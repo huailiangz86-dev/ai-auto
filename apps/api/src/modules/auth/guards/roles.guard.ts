@@ -2,10 +2,10 @@
 // Roles Guard - Role-based access control
 // ============================================================
 
-import { Injectable, CanActivate, ExecutionContext } from '@nestjs/common';
-import { Reflector } from '@nestjs/core';
-import { ROLES_KEY } from '../../common/decorators/roles.decorator';
-import { UserRole } from '@ai-auto/shared';
+import { Injectable, CanActivate, ExecutionContext } from '@nestjs/common'
+import { Reflector } from '@nestjs/core'
+import { ROLES_KEY } from '../../common/decorators/roles.decorator'
+import { UserRole } from '@ai-auto/shared'
 
 @Injectable()
 export class RolesGuard implements CanActivate {
@@ -15,13 +15,13 @@ export class RolesGuard implements CanActivate {
     const requiredRoles = this.reflector.getAllAndOverride<UserRole[]>(ROLES_KEY, [
       context.getHandler(),
       context.getClass(),
-    ]);
+    ])
 
-    if (!requiredRoles) {
-      return true;
+    if (!requiredRoles || requiredRoles.length === 0) {
+      return true
     }
 
-    const { user } = context.switchToHttp().getRequest();
-    return requiredRoles.some((role) => user.role === role);
+    const { user } = context.switchToHttp().getRequest()
+    return requiredRoles.includes(user?.role)
   }
 }
