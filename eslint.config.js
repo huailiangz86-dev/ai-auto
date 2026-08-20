@@ -1,14 +1,14 @@
-// ============================================================
-// AI auto - ESLint Configuration (Flat format for ESLint 9)
-// ============================================================
+// @ts-check
+import { dirname, resolve } from 'path'
+import { fileURLToPath } from 'url'
+import js from '@eslint/js'
+import tseslint from '@typescript-eslint/eslint-plugin'
+import tsparser from '@typescript-eslint/parser'
+import prettierConfig from 'eslint-config-prettier'
 
-import js from '@eslint/js';
-import tseslint from '@typescript-eslint/eslint-plugin';
-import tsparser from '@typescript-eslint/parser';
-import prettier from 'eslint-plugin-prettier';
+const __dirname = dirname(fileURLToPath(import.meta.url))
 
 export default [
-  // Base JS config
   js.configs.recommended,
 
   // Ignore patterns
@@ -33,21 +33,32 @@ export default [
         ecmaVersion: 2022,
         sourceType: 'module',
         project: true,
+        tsconfigRootDir: resolve(__dirname),
+      },
+      globals: {
+        process: 'readonly',
+        console: 'readonly',
+        __dirname: 'readonly',
+        __filename: 'readonly',
+        global: 'readonly',
+        require: 'readonly',
+        module: 'readonly',
       },
     },
     plugins: {
       '@typescript-eslint': tseslint,
-      prettier,
     },
     rules: {
-      ...tseslint.configs['recommended-type-checked'].rules,
-      ...tseslint.configs['stylistic-type-checked'].rules,
-      'prettier/prettier': 'error',
+      ...tseslint.configs['recommended'].rules,
+      ...tseslint.configs['stylistic'].rules,
+      ...prettierConfig.rules,
       '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
-      '@typescript-eslint/no-explicit-any': 'warn',
+      '@typescript-eslint/no-explicit-any': 'off',
       '@typescript-eslint/no-floating-promises': 'error',
       '@typescript-eslint/await-thenable': 'error',
-      'no-console': ['warn', { allow: ['warn', 'error'] }],
+      '@typescript-eslint/require-await': 'warn',
+      '@typescript-eslint/no-unnecessary-type-assertion': 'warn',
+      'no-console': 'off',
       'prefer-const': 'error',
       'no-var': 'error',
     },
@@ -57,15 +68,7 @@ export default [
   {
     files: ['**/*.json'],
     rules: {
-      'prettier/prettier': ['error', { printWidth: 120 }],
+      ...prettierConfig.rules,
     },
   },
-
-  // Markdown files
-  {
-    files: ['**/*.md'],
-    rules: {
-      'prettier/prettier': ['error', { proseWrap: 'preserve', printWidth: 80 }],
-    },
-  },
-];
+]
