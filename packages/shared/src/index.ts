@@ -4,10 +4,12 @@
 
 // ---------- User Roles ----------
 export enum UserRole {
-  MERCHANT = 'merchant',
+  MERCHANT_ADMIN = 'merchant_admin',
+  MERCHANT_STAFF = 'merchant_staff',
   AGENT = 'agent',
-  ADMIN = 'admin',
   CUSTOMER = 'customer',
+  ADMIN = 'admin',
+  SUPER_ADMIN = 'super_admin',
 }
 
 // ---------- Agent Levels ----------

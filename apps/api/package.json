@@ -93,7 +93,7 @@
     "coverageDirectory": "../coverage",
     "testEnvironment": "node",
     "moduleNameMapper": {
-      "^@ai-auto/shared(|/.*)$": "<rootDir>/../../packages/shared/src/$1"
+      "^@ai-auto/shared(|/.*)$": "/Users/zhang/Documents/AI auto/packages/shared/src/$1"
     }
   }
 }

@@ -64,12 +64,12 @@ export class AuthService {
     this.logger.log(`Merchant registered: ${merchant.id}`)
 
     return {
-      ...this.tokenService.generateTokens(merchant.id, UserRole.MERCHANT),
+      ...this.tokenService.generateTokens(merchant.id, UserRole.MERCHANT_ADMIN),
       user: {
         id: merchant.id,
         businessName: merchant.businessName,
         phone: merchant.phone,
-        role: UserRole.MERCHANT,
+        role: UserRole.MERCHANT_ADMIN,
         auditStatus: merchant.auditStatus,
       },
     }
@@ -92,12 +92,12 @@ export class AuthService {
 
     this.logger.log(`Merchant logged in: ${merchant.id}`)
     return {
-      ...this.tokenService.generateTokens(merchant.id, UserRole.MERCHANT),
+      ...this.tokenService.generateTokens(merchant.id, UserRole.MERCHANT_ADMIN),
       user: {
         id: merchant.id,
         businessName: merchant.businessName,
         phone: merchant.phone,
-        role: UserRole.MERCHANT,
+        role: UserRole.MERCHANT_ADMIN,
         auditStatus: merchant.auditStatus,
       },
     }
@@ -301,7 +301,7 @@ export class AuthService {
 
   private getRepoByRole(role: UserRole): Repository<any> {
     switch (role) {
-      case UserRole.MERCHANT:
+      case UserRole.MERCHANT_ADMIN:
         return this.merchantRepo
       case UserRole.AGENT:
         return this.agentRepo
