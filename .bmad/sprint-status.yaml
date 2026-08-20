@@ -19,7 +19,7 @@ sprints:
     end_date: '2026-08-29'
     capacity_points: 48
     committed_points: 16
-    completed_points: 8
+    completed_points: 16
     status: 'not_started'
     goal: '搭建完整开发环境，交付数据库设计和认证系统'
     stories:
@@ -44,8 +44,9 @@ sprints:
         epic: 'Infrastructure'
         priority: 'Infrastructure'
         points: 5
-        status: 'not_started'
+        status: 'completed'
         assigned_to: null
+        completion_date: '2026-08-20'
 
   - sprint_number: 1
     name: '核心业务引擎'

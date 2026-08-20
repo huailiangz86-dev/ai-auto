@@ -1,83 +1,155 @@
 // ============================================================
-// Auth Controller - Authentication endpoints
+// Auth Controller - All authentication endpoints
 // ============================================================
 
-import { Controller, Post, Body, Get, UseGuards, Request } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
-import { AuthService } from './auth.service';
-import { JwtAuthGuard } from './guards/jwt-auth.guard';
-import { IsString, MinLength, IsMobilePhone } from 'class-validator';
-
-class LoginDto {
-  @IsString() username: string;
-  @IsString() @MinLength(6) password: string;
-}
-
-class SendSmsDto {
-  @IsMobilePhone('zh-CN') phone: string;
-}
-
-class SmsLoginDto {
-  @IsMobilePhone('zh-CN') phone: string;
-  @IsString() code: string;
-}
-
-class RefreshTokenDto {
-  @IsString() refresh_token: string;
-}
+import {
+  Controller,
+  Post,
+  Get,
+  Body,
+  UseGuards,
+  Request,
+  HttpCode,
+  HttpStatus,
+} from '@nestjs/common'
+import { ApiTags, ApiOperation, ApiBearerAuth, ApiResponse } from '@nestjs/swagger'
+import { AuthService } from './auth.service'
+import { SmsService } from './services/sms.service'
+import { JwtAuthGuard } from './guards/jwt-auth.guard'
+import { RolesGuard } from './guards/roles.guard'
+import { CurrentUser } from './decorators/current-user.decorator'
+import { Roles } from './decorators/roles.decorator'
+import { UserRole } from '@ai-auto/shared'
+import {
+  MerchantRegisterDto,
+  MerchantLoginDto,
+  AgentRegisterDto,
+  AgentLoginDto,
+  SendSmsCodeDto,
+  SmsLoginDto,
+  RefreshTokenDto,
+  ChangePasswordDto,
+  ResetPasswordDto,
+} from './dto/auth.dto'
 
 @ApiTags('auth')
 @Controller('auth')
 export class AuthController {
-  constructor(private authService: AuthService) {}
+  constructor(
+    private authService: AuthService,
+    private smsService: SmsService,
+  ) {}
 
-  @Post('login')
-  @ApiOperation({ summary: 'Login with username/password' })
-  async login(@Body() dto: LoginDto) {
-    const user = await this.authService.validateUser(dto.username, dto.password);
-    if (!user) {
-      return { success: false, error: 'Invalid credentials' };
-    }
-    return this.authService.login(user);
+  // ==================== Merchant ====================
+
+  @Post('merchant/register')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Register as a merchant' })
+  @ApiResponse({ status: 201, description: 'Merchant registered successfully' })
+  async merchantRegister(@Body() dto: MerchantRegisterDto) {
+    return this.authService.merchantRegister(dto)
   }
 
+  @Post('merchant/login')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Merchant login with phone + password' })
+  async merchantLogin(@Body() dto: MerchantLoginDto) {
+    return this.authService.merchantLogin(dto)
+  }
+
+  // ==================== Agent ====================
+
+  @Post('agent/register')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Register as a sharing agent' })
+  async agentRegister(@Body() dto: AgentRegisterDto) {
+    return this.authService.agentRegister(dto)
+  }
+
+  @Post('agent/login')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Agent login with phone + password' })
+  async agentLogin(@Body() dto: AgentLoginDto) {
+    return this.authService.agentLogin(dto)
+  }
+
+  // ==================== SMS ====================
+
   @Post('sms/send')
+  @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Send SMS verification code' })
-  async sendSmsCode(@Body() dto: SendSmsDto) {
-    return this.authService.sendSmsCode(dto.phone);
+  async sendSmsCode(@Body() dto: SendSmsCodeDto) {
+    return this.smsService.sendCode(dto.phone, 'login')
   }
 
   @Post('sms/login')
-  @ApiOperation({ summary: 'Login with phone + SMS code' })
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Login with phone + SMS code (agent only)' })
   async smsLogin(@Body() dto: SmsLoginDto) {
-    const valid = await this.authService.verifySmsCode(dto.phone, dto.code);
-    if (!valid) {
-      return { success: false, error: 'Invalid or expired code' };
-    }
-    // TODO: Find or create user by phone
-    return { success: true };
+    return this.authService.agentSmsLogin(dto.phone, dto.code)
   }
+
+  // ==================== Token ====================
 
   @Post('refresh')
+  @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Refresh access token' })
   async refresh(@Body() dto: RefreshTokenDto) {
-    return this.authService.refreshToken(dto.refresh_token);
-  }
-
-  @Get('me')
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
-  @ApiOperation({ summary: 'Get current user info' })
-  async me(@Request() req) {
-    return req.user;
+    return this.authService.refreshTokens(dto.refresh_token)
   }
 
   @Post('logout')
   @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Logout and invalidate tokens' })
-  async logout(@Request() req) {
-    // TODO: Invalidate tokens in Redis
-    return { success: true };
+  @ApiOperation({ summary: 'Logout current session' })
+  async logout(@CurrentUser() user: any) {
+    return { success: true, message: 'Logged out successfully' }
+  }
+
+  // ==================== Profile ====================
+
+  @Get('me')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get current user profile' })
+  async me(@CurrentUser() user: any) {
+    return this.authService.getUserProfile(user.id, user.role)
+  }
+
+  // ==================== Password ====================
+
+  @Post('password/change')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Change current password' })
+  async changePassword(@CurrentUser() user: any, @Body() dto: ChangePasswordDto) {
+    await this.authService.changePassword(user.id, user.role, dto.currentPassword, dto.newPassword)
+    return { success: true, message: 'Password changed successfully' }
+  }
+
+  @Post('password/reset/send')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Send reset password SMS code' })
+  async resetPasswordSend(@Body() dto: { phone: string }) {
+    return this.smsService.sendCode(dto.phone, 'reset_password')
+  }
+
+  @Post('password/reset/confirm')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Reset password with SMS code' })
+  async resetPasswordConfirm(@Body() dto: ResetPasswordDto) {
+    await this.authService.resetPassword(dto.phone, dto.code, dto.newPassword)
+    return { success: true, message: 'Password reset successfully' }
+  }
+
+  // ==================== Admin ====================
+
+  @Post('admin/login')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Admin login' })
+  async adminLogin(@Body() dto: { username: string; password: string }) {
+    return this.authService.adminLogin(dto.username, dto.password)
   }
 }
