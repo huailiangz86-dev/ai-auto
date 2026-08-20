@@ -17,6 +17,11 @@ import { MerchantController } from './merchant.controller'
 import { MerchantService } from './merchant.service'
 import { MerchantWalletController } from './merchant-wallet.controller'
 import { MerchantWalletService } from './merchant-wallet.service'
+import { AICampaignController } from './ai-campaign.controller'
+import { AICampaignService } from './ai-campaign.service'
+
+import { CampaignModule } from '../campaign/campaign.module'
+import { AIBridgeModule } from '../ai-bridge/ai-bridge.module'
 
 @Module({
   imports: [
@@ -29,9 +34,11 @@ import { MerchantWalletService } from './merchant-wallet.service'
       BudgetTransaction,
       PlatformRevenue,
     ]),
+    CampaignModule,
+    AIBridgeModule,
   ],
-  controllers: [MerchantController, MerchantWalletController],
-  providers: [MerchantService, MerchantWalletService],
+  controllers: [MerchantController, MerchantWalletController, AICampaignController],
+  providers: [MerchantService, MerchantWalletService, AICampaignService],
   exports: [MerchantService, MerchantWalletService],
 })
 export class MerchantModule {}
