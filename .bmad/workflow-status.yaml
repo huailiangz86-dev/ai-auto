@@ -1,0 +1,33 @@
+version: "6.0.0"
+project_name: "AI auto"
+project_level: 3
+current_phase: "implementation"
+current_sprint: 0
+
+workflows:
+  brainstorm:
+    status: "completed"
+    completed_at: "2026-08-19"
+    document: "docs/brainstorming-ai-auto-2026-08-19.md"
+  prd:
+    status: "completed"
+    completed_at: "2026-08-20"
+    document: "docs/prd-ai-auto-2026-08-20.md"
+  architecture:
+    status: "completed"
+    completed_at: "2026-08-20"
+    document: "docs/architecture-ai-auto-2026-08-20.md"
+  sprint-planning:
+    status: "completed"
+    completed_at: "2026-08-20"
+    document: "docs/sprint-plan-ai-auto-2026-08-20.md"
+  tech-spec:
+    status: "not_started"
+  design:
+    status: "not_started"
+
+sprints_summary:
+  total_sprints: 8
+  total_stories: 41
+  total_points: 207
+  completed_sprints: 0

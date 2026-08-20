@@ -1,0 +1,76 @@
+# ============================================================
+# AI auto - Git Ignore
+# ============================================================
+
+# Dependencies
+node_modules/
+.pnpm-store/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+ENV/
+env/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Build outputs
+dist/
+build/
+coverage/
+*.tsbuildinfo/
+.turbo/
+out/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+.env.*.yaml
+!.env.example
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Test
+coverage/
+.nyc_output/
+
+# Docker
+.dockerignore
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+logs/
+
+# Turborepo
+.turbo/
+
+# TypeScript cache
+*.tsbuildinfo
+
+# Misc
+*.local
+*.tmp
+*.temp

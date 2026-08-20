@@ -1,0 +1,13 @@
+# ============================================================
+# AI auto - Prettier Ignore
+# ============================================================
+
+dist
+node_modules
+coverage
+.turbo
+*.min.js
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
+package/**/dist

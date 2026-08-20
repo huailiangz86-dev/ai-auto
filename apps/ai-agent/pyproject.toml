@@ -1,0 +1,50 @@
+{
+  "name": "@ai-auto/ai-agent",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AI auto - AI Agent service (FastAPI)",
+  "scripts": {
+    "dev": "uvicorn src.main:app --reload --port 8000",
+    "build": "echo 'No build step needed for FastAPI'",
+    "start": "uvicorn src.main:app --host 0.0.0.0 --port 8000",
+    "lint": "ruff check src/ --fix",
+    "lint:check": "ruff check src/",
+    "format": "ruff format src/",
+    "test": "pytest",
+    "test:watch": "pytest --watch",
+    "test:cov": "pytest --cov=src --cov-report=html",
+    "type-check": "mypy src/",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "fastapi": "^0.115.6",
+    "uvicorn": "^0.34.0",
+    "pydantic": "^2.10.4",
+    "pydantic-settings": "^2.7.0",
+    "httpx": "^0.28.1",
+    "anthropic": "^0.42.0",
+    "redis": "^5.2.1",
+    "sqlalchemy": "^2.0.36",
+    "asyncpg": "^0.30.0",
+    "python-dotenv": "^1.0.1",
+    "python-jose": "^3.3.0",
+    "passlib": "^1.7.4",
+    "alembic": "^1.14.0",
+    "sentry-sdk": "^2.18.0",
+    "structlog": "^24.4.0",
+    "python-multipart": "^0.0.20",
+    "tenacity": "^9.0.0",
+    "celery": "^5.4.0"
+  },
+  "devDependencies": {
+    "pytest": "^8.3.4",
+    "pytest-asyncio": "^0.24.0",
+    "pytest-cov": "^6.0.0",
+    "pytest-httpx": "^0.32.0",
+    "ruff": "^0.8.4",
+    "mypy": "^1.14.0",
+    "pre-commit": "^4.0.1",
+    "httpx": "^0.28.1",
+    "faker": "^33.3.1"
+  }
+}

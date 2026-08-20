@@ -1,0 +1,17 @@
+#!/usr/bin/env sh
+. "$(dirname -- "$0")/_/husky.sh"
+commit_msg_file="$1"
+commit_msg=$(cat "$commit_msg_file")
+allowed_types="feat|fix|docs|style|refactor|test|chore|perf|ci|revert"
+pattern="^($allowed_types)(\([[:alnum:]_/-]+\))?!?: .+"
+if ! echo "$commit_msg" | grep -qE "$pattern"; then
+    echo "❌ Invalid commit message format"
+    echo ""
+    echo "Format: <type>(<scope>): <subject>"
+    echo "Allowed types: $allowed_types"
+    echo "Examples:"
+    echo "  feat(auth): add SMS login"
+    echo "  fix(commission): correct T+3 calculation"
+    exit 1
+fi
+echo "✅ Commit message format validated"

@@ -1,0 +1,400 @@
+version: "6.0.0"
+project_name: "AI auto"
+project_level: 3
+current_sprint: 0
+sprint_plan_path: "docs/sprint-plan-ai-auto-2026-08-20.md"
+
+team:
+  size: 2
+  sprint_length_weeks: 2
+  productive_hours_per_day: 6
+  senior_hours_per_point: 2
+  capacity_per_sprint: 48
+  total_capacity_all_sprints: 384
+
+sprints:
+  - sprint_number: 0
+    name: "基础设施"
+    start_date: "2026-08-23"
+    end_date: "2026-08-29"
+    capacity_points: 48
+    committed_points: 16
+    completed_points: 0
+    status: "not_started"
+    goal: "搭建完整开发环境，交付数据库设计和认证系统"
+    stories:
+      - story_id: "STORY-AI-001"
+        title: "基础项目搭建"
+        epic: "Infrastructure"
+        priority: "Infrastructure"
+        points: 3
+        status: "not_started"
+        assigned_to: null
+      - story_id: "STORY-AI-002"
+        title: "数据库设计与实现"
+        epic: "Infrastructure"
+        priority: "Infrastructure"
+        points: 8
+        status: "not_started"
+        assigned_to: null
+      - story_id: "STORY-AI-003"
+        title: "用户认证与权限系统"
+        epic: "Infrastructure"
+        priority: "Infrastructure"
+        points: 5
+        status: "not_started"
+        assigned_to: null
+
+  - sprint_number: 1
+    name: "核心业务引擎"
+    start_date: "2026-08-30"
+    end_date: "2026-09-12"
+    capacity_points: 48
+    committed_points: 34
+    completed_points: 0
+    status: "not_started"
+    goal: "完成归属锁客 + 佣金引擎 + 商家入驻基础"
+    stories:
+      - story_id: "STORY-AI-004"
+        title: "商家入驻与订阅"
+        epic: "EPIC-001"
+        priority: "Must Have"
+        points: 5
+        status: "not_started"
+        assigned_to: null
+      - story_id: "STORY-AI-005"
+        title: "商家业务系统集成"
+        epic: "EPIC-001"
+        priority: "Must Have"
+        points: 5
+        status: "not_started"
+        assigned_to: null
+      - story_id: "STORY-AI-006"
+        title: "客户归属与365天锁客"
+        epic: "EPIC-004"
+        priority: "Must Have"
+        points: 8
+        status: "not_started"
+        assigned_to: null
+      - story_id: "STORY-AI-007"
+        title: "佣金计算与分账引擎"
+        epic: "EPIC-005"
+        priority: "Must Have"
+        points: 8
+        status: "not_started"
+        assigned_to: null
+      - story_id: "STORY-AI-008"
+        title: "T+3 佣金结算与提现"
+        epic: "EPIC-005"
+        priority: "Must Have"
+        points: 5
+        status: "not_started"
+        assigned_to: null
+      - story_id: "STORY-AI-009"
+        title: "商家钱包与预算管理"
+        epic: "EPIC-005"
+        priority: "Must Have"
+        points: 3
+        status: "not_started"
+        assigned_to: null
+
+  - sprint_number: 2
+    name: "业务功能"
+    start_date: "2026-09-13"
+    end_date: "2026-09-26"
+    capacity_points: 48
+    committed_points: 31
+    completed_points: 0
+    status: "not_started"
+    goal: "营销活动管理 + 分享员招募 + 基础平台功能"
+    stories:
+      - story_id: "STORY-AI-010"
+        title: "营销活动管理"
+        epic: "EPIC-002"
+        priority: "Must Have"
+        points: 5
+        status: "not_started"
+        assigned_to: null
+      - story_id: "STORY-AI-011"
+        title: "AI 自然语言创建活动"
+        epic: "EPIC-002"
+        priority: "Must Have"
+        points: 8
+        status: "not_started"
+        assigned_to: null
+      - story_id: "STORY-AI-012"
+        title: "裂变链路追踪与分析"
+        epic: "EPIC-002"
+        priority: "Should Have"
+        points: 5
+        status: "not_started"
+        assigned_to: null
+      - story_id: "STORY-AI-013"
+        title: "分享员招募与绑定"
+        epic: "EPIC-003"
+        priority: "Must Have"
+        points: 5
+        status: "not_started"
+        assigned_to: null
+      - story_id: "STORY-AI-014"
+        title: "分享员信誉分系统"
+        epic: "EPIC-003"
+        priority: "Should Have"
+        points: 3
+        status: "not_started"
+        assigned_to: null
+      - story_id: "STORY-AI-015"
+        title: "分享员多平台账号绑定"
+        epic: "EPIC-007"
+        priority: "Must Have"
+        points: 5
+        status: "not_started"
+        assigned_to: null
+
+  - sprint_number: 3
+    name: "C端核心"
+    start_date: "2026-09-27"
+    end_date: "2026-10-10"
+    capacity_points: 48
+    committed_points: 26
+    completed_points: 0
+    status: "not_started"
+    goal: "C端小程序基础 + 核销流程 + AI 文案"
+    stories:
+      - story_id: "STORY-AI-016"
+        title: "C端领券入口"
+        epic: "EPIC-008"
+        priority: "Must Have"
+        points: 5
+        status: "not_started"
+        assigned_to: null
+      - story_id: "STORY-AI-017"
+        title: "C端券核销流程"
+        epic: "EPIC-008"
+        priority: "Must Have"
+        points: 8
+        status: "not_started"
+        assigned_to: null
+      - story_id: "STORY-AI-018"
+        title: "C端小程序基础框架"
+        epic: "EPIC-008"
+        priority: "Must Have"
+        points: 5
+        status: "not_started"
+        assigned_to: null
+      - story_id: "STORY-AI-019"
+        title: "C端社交分享与裂变"
+        epic: "EPIC-008"
+        priority: "Must Have"
+        points: 3
+        status: "not_started"
+        assigned_to: null
+      - story_id: "STORY-AI-020"
+        title: "AI 文案生成"
+        epic: "EPIC-006"
+        priority: "Must Have"
+        points: 5
+        status: "not_started"
+        assigned_to: null
+
+  - sprint_number: 4
+    name: "内容与分发"
+    start_date: "2026-10-11"
+    end_date: "2026-10-24"
+    capacity_points: 48
+    committed_points: 24
+    completed_points: 0
+    status: "not_started"
+    goal: "AI 视频/海报 + 多平台分发 + 抖音接入"
+    stories:
+      - story_id: "STORY-AI-021"
+        title: "AI 短视频生成"
+        epic: "EPIC-006"
+        priority: "Should Have"
+        points: 8
+        status: "not_started"
+        assigned_to: null
+      - story_id: "STORY-AI-022"
+        title: "AI 海报/主图生成"
+        epic: "EPIC-006"
+        priority: "Should Have"
+        points: 3
+        status: "not_started"
+        assigned_to: null
+      - story_id: "STORY-AI-023"
+        title: "多平台一键分发"
+        epic: "EPIC-007"
+        priority: "Must Have"
+        points: 8
+        status: "not_started"
+        assigned_to: null
+      - story_id: "STORY-AI-024"
+        title: "抖音企业号接入"
+        epic: "EPIC-007"
+        priority: "Must Have"
+        points: 5
+        status: "not_started"
+        assigned_to: null
+
+  - sprint_number: 5
+    name: "平台运营+AI审核"
+    start_date: "2026-10-25"
+    end_date: "2026-11-07"
+    capacity_points: 48
+    committed_points: 34
+    completed_points: 0
+    status: "not_started"
+    goal: "平台审核/风控/运营 + AI 内容审核"
+    stories:
+      - story_id: "STORY-AI-025"
+        title: "小红书企业号接入"
+        epic: "EPIC-007"
+        priority: "Should Have"
+        points: 5
+        status: "not_started"
+        assigned_to: null
+      - story_id: "STORY-AI-026"
+        title: "视频号接入"
+        epic: "EPIC-007"
+        priority: "Should Have"
+        points: 5
+        status: "not_started"
+        assigned_to: null
+      - story_id: "STORY-AI-027"
+        title: "AI Agent 活动自动配置"
+        epic: "EPIC-010"
+        priority: "Must Have"
+        points: 8
+        status: "not_started"
+        assigned_to: null
+      - story_id: "STORY-AI-030"
+        title: "AI 内容审核"
+        epic: "EPIC-009"
+        priority: "Must Have"
+        points: 5
+        status: "not_started"
+        assigned_to: null
+      - story_id: "STORY-AI-031"
+        title: "商户资质审核"
+        epic: "EPIC-009"
+        priority: "Must Have"
+        points: 3
+        status: "not_started"
+        assigned_to: null
+      - story_id: "STORY-AI-032"
+        title: "分享员资质审核"
+        epic: "EPIC-009"
+        priority: "Must Have"
+        points: 3
+        status: "not_started"
+        assigned_to: null
+      - story_id: "STORY-AI-033"
+        title: "资金风控"
+        epic: "EPIC-009"
+        priority: "Must Have"
+        points: 5
+        status: "not_started"
+        assigned_to: null
+
+  - sprint_number: 6
+    name: "AI Agent+运营大屏"
+    start_date: "2026-11-08"
+    end_date: "2026-11-21"
+    capacity_points: 48
+    committed_points: 23
+    completed_points: 0
+    status: "not_started"
+    goal: "AI Agent 自动优化 + 运营大屏 + C端 AI 工具"
+    stories:
+      - story_id: "STORY-AI-028"
+        title: "AI Agent 活动优化"
+        epic: "EPIC-010"
+        priority: "Should Have"
+        points: 5
+        status: "not_started"
+        assigned_to: null
+      - story_id: "STORY-AI-029"
+        title: "AI Agent 活动创意推荐"
+        epic: "EPIC-010"
+        priority: "Could Have"
+        points: 3
+        status: "not_started"
+        assigned_to: null
+      - story_id: "STORY-AI-034"
+        title: "AI 客服机器人"
+        epic: "EPIC-009"
+        priority: "Should Have"
+        points: 5
+        status: "not_started"
+        assigned_to: null
+      - story_id: "STORY-AI-035"
+        title: "平台运营大屏"
+        epic: "EPIC-009"
+        priority: "Must Have"
+        points: 5
+        status: "not_started"
+        assigned_to: null
+      - story_id: "STORY-AI-036"
+        title: "C端 AI 创作工具"
+        epic: "EPIC-008"
+        priority: "Should Have"
+        points: 5
+        status: "not_started"
+        assigned_to: null
+
+  - sprint_number: 7
+    name: "增值功能"
+    start_date: "2026-11-22"
+    end_date: "2026-12-05"
+    capacity_points: 48
+    committed_points: 19
+    completed_points: 0
+    status: "not_started"
+    goal: "游戏化 + 任务广场 + 收入证明 + CRM + 快手"
+    stories:
+      - story_id: "STORY-AI-037"
+        title: "C端游戏化裂变"
+        epic: "EPIC-013"
+        priority: "Could Have"
+        points: 5
+        status: "not_started"
+        assigned_to: null
+      - story_id: "STORY-AI-038"
+        title: "分享员任务广场"
+        epic: "EPIC-013"
+        priority: "Should Have"
+        points: 5
+        status: "not_started"
+        assigned_to: null
+      - story_id: "STORY-AI-039"
+        title: "分享员收入证明生成"
+        epic: "EPIC-003"
+        priority: "Could Have"
+        points: 3
+        status: "not_started"
+        assigned_to: null
+      - story_id: "STORY-AI-040"
+        title: "商户 CRM 整合"
+        epic: "EPIC-011"
+        priority: "Could Have"
+        points: 3
+        status: "not_started"
+        assigned_to: null
+      - story_id: "STORY-AI-041"
+        title: "快手接入"
+        epic: "EPIC-007"
+        priority: "Could Have"
+        points: 3
+        status: "not_started"
+        assigned_to: null
+
+velocity:
+  sprint_0: null
+  sprint_1: null
+  sprint_2: null
+  sprint_3: null
+  sprint_4: null
+  sprint_5: null
+  sprint_6: null
+  sprint_7: null
+  rolling_average: null
