@@ -12,11 +12,11 @@ export enum UserRole {
 
 // ---------- Agent Levels ----------
 export enum AgentLevel {
-  BRONZE = 'bronze',    // 0-10 valid customers
-  SILVER = 'silver',    // 11-50
-  GOLD = 'gold',        // 51-200
-  DIAMOND = 'diamond',  // 201-500
-  KING = 'king',        // 500+
+  BRONZE = 'bronze', // 0-10 valid customers
+  SILVER = 'silver', // 11-50
+  GOLD = 'gold', // 51-200
+  DIAMOND = 'diamond', // 201-500
+  KING = 'king', // 500+
 }
 
 // ---------- Commission Multipliers ----------
@@ -26,7 +26,7 @@ export const AGENT_LEVEL_MULTIPLIERS: Record<AgentLevel, number> = {
   [AgentLevel.GOLD]: 1.2,
   [AgentLevel.DIAMOND]: 1.5,
   [AgentLevel.KING]: 2.0,
-};
+}
 
 // ---------- Agent Level Thresholds ----------
 export const AGENT_LEVEL_THRESHOLDS: Record<AgentLevel, number> = {
@@ -35,30 +35,30 @@ export const AGENT_LEVEL_THRESHOLDS: Record<AgentLevel, number> = {
   [AgentLevel.GOLD]: 51,
   [AgentLevel.DIAMOND]: 201,
   [AgentLevel.KING]: 500,
-};
+}
 
 // ---------- Platform Commission Rate ----------
-export const PLATFORM_COMMISSION_RATE = 0.20; // 20% platform fee
-export const AGENT_COMMISSION_RATE = 0.80;    // 80% to agent
+export const PLATFORM_COMMISSION_RATE = 0.2 // 20% platform fee
+export const AGENT_COMMISSION_RATE = 0.8 // 80% to agent
 
 // ---------- Lock Period ----------
-export const LOCK_PERIOD_DAYS = 365;
+export const LOCK_PERIOD_DAYS = 365
 
 // ---------- Settlement ----------
-export const SETTLEMENT_T_PLUS_DAYS = 3; // T+3 business days
-export const MIN_WITHDRAWAL_AMOUNT = 10; // ¥10 minimum
+export const SETTLEMENT_T_PLUS_DAYS = 3 // T+3 business days
+export const MIN_WITHDRAWAL_AMOUNT = 10 // ¥10 minimum
 
 // ---------- Subscription ----------
-export const SUBSCRIPTION_PRICE_PER_STORE = 1200; // ¥1,200/store/year
+export const SUBSCRIPTION_PRICE_PER_STORE = 1200 // ¥1,200/store/year
 
 // ---------- AI Token Cost ----------
-export const AI_TOKEN_COST_BEARER = 'agent'; // token cost borne by agent
+export const AI_TOKEN_COST_BEARER = 'agent' // token cost borne by agent
 
 // ---------- Campaign Types ----------
 export enum CampaignType {
-  DISCOUNT = 'discount',    // 满减
+  DISCOUNT = 'discount', // 满减
   CASH_REWARD = 'cash_reward', // 现金奖励
-  COMBO = 'combo',          // 组合券
+  COMBO = 'combo', // 组合券
 }
 
 // ---------- Coupon Status ----------
@@ -112,6 +112,55 @@ export enum AuditActionType {
   FRAUD_DETECTED = 'fraud_detected',
 }
 
+// ---------- Customer Coupon Source ----------
+export enum CouponSource {
+  SHARE_LINK = 'share_link',
+  QR_CODE = 'qr_code',
+  LBS = 'lbs',
+  SEARCH = 'search',
+  WECHAT_MP = 'wechat_mp',
+}
+
+// ---------- Customer Coupon Status ----------
+export enum CustomerCouponStatus {
+  ACTIVE = 'active', // claimed, not used, not expired
+  USED = 'used', // redeemed at merchant
+  EXPIRED = 'expired', // past validity period
+}
+
+// ---------- Fraud Alert ----------
+export enum FraudAlertType {
+  SUSPICIOUS_SELF_REDEMPTION = 'suspicious_self_redemption',
+  HIGH_FREQUENCY_REDEMPTION = 'high_frequency_redemption',
+  MERCHANT_ABNORMAL_RATE = 'merchant_abnormal_rate',
+  COUPON_STACKING = 'coupon_stacking',
+  DEVICE_FINGERPRINT = 'device_fingerprint',
+  IP_CLUSTERING = 'ip_clustering',
+  COMMISSION_ANOMALY = 'commission_anomaly',
+  CONTENT_VIOLATION = 'content_violation',
+}
+
+export enum FraudAlertSeverity {
+  CRITICAL = 'critical',
+  WARNING = 'warning',
+  NOTICE = 'notice',
+}
+
+export enum FraudAlertStatus {
+  PENDING = 'pending',
+  REVIEWED = 'reviewed',
+  ACTIONED = 'actioned',
+  DISMISSED = 'dismissed',
+}
+
+// ---------- Platform Revenue Type ----------
+export enum RevenueType {
+  COMMISSION_ROYALTY = 'commission_royalty',
+  SUBSCRIPTION = 'subscription',
+  AI_TOKEN = 'ai_token',
+  REFUND = 'refund',
+}
+
 // ---------- Platform Types ----------
 export enum PlatformType {
   WECHAT = 'wechat',
@@ -150,55 +199,55 @@ export enum CommissionTransactionType {
 
 // ---------- Common Response Types ----------
 export interface ApiResponse<T = unknown> {
-  success: boolean;
-  data?: T;
-  error?: string;
-  message?: string;
+  success: boolean
+  data?: T
+  error?: string
+  message?: string
 }
 
 export interface PaginatedResponse<T> {
-  items: T[];
-  total: number;
-  page: number;
-  pageSize: number;
-  totalPages: number;
+  items: T[]
+  total: number
+  page: number
+  pageSize: number
+  totalPages: number
 }
 
 export interface PaginationParams {
-  page?: number;
-  pageSize?: number;
-  sortBy?: string;
-  sortOrder?: 'asc' | 'desc';
+  page?: number
+  pageSize?: number
+  sortBy?: string
+  sortOrder?: 'asc' | 'desc'
 }
 
 // ---------- Date Ranges ----------
-export const SUBSCRIPTION_RENEWAL_REMINDER_DAYS = [30, 7, 1];
-export const REDEMPTION_CALLBACK_TIMEOUT_HOURS = 72;
-export const TOKEN_EXPIRY_MINUTES = 15;
-export const REFRESH_TOKEN_EXPIRY_DAYS = 7;
-export const SMS_CODE_EXPIRY_MINUTES = 5;
+export const SUBSCRIPTION_RENEWAL_REMINDER_DAYS = [30, 7, 1]
+export const REDEMPTION_CALLBACK_TIMEOUT_HOURS = 72
+export const TOKEN_EXPIRY_MINUTES = 15
+export const REFRESH_TOKEN_EXPIRY_DAYS = 7
+export const SMS_CODE_EXPIRY_MINUTES = 5
 
 // ---------- ID Generation ----------
 export function generateIdempotencyKey(prefix: string, ...parts: (string | number)[]): string {
-  return [prefix, ...parts.map(String)].join(':');
+  return [prefix, ...parts.map(String)].join(':')
 }
 
 // ---------- Platform Fee Calculation ----------
 export function calculatePlatformFee(amount: number): number {
-  return Math.round(amount * PLATFORM_COMMISSION_RATE * 100) / 100;
+  return Math.round(amount * PLATFORM_COMMISSION_RATE * 100) / 100
 }
 
 export function calculateAgentPayout(amount: number): number {
-  return Math.round(amount * AGENT_COMMISSION_RATE * 100) / 100;
+  return Math.round(amount * AGENT_COMMISSION_RATE * 100) / 100
 }
 
 export function calculateCommissionWithLevel(
   amount: number,
-  level: AgentLevel
+  level: AgentLevel,
 ): { platformFee: number; agentPayout: number; finalPayout: number } {
-  const baseAgentPayout = calculateAgentPayout(amount);
-  const multiplier = AGENT_LEVEL_MULTIPLIERS[level];
-  const finalPayout = Math.round(baseAgentPayout * multiplier * 100) / 100;
-  const platformFee = Math.round((amount - finalPayout) * 100) / 100;
-  return { platformFee, agentPayout: baseAgentPayout, finalPayout };
+  const baseAgentPayout = calculateAgentPayout(amount)
+  const multiplier = AGENT_LEVEL_MULTIPLIERS[level]
+  const finalPayout = Math.round(baseAgentPayout * multiplier * 100) / 100
+  const platformFee = Math.round((amount - finalPayout) * 100) / 100
+  return { platformFee, agentPayout: baseAgentPayout, finalPayout }
 }
