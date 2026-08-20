@@ -4,7 +4,7 @@
 
 import { Test, TestingModule } from '@nestjs/testing'
 import { getRepositoryToken } from '@nestjs/typeorm'
-import type { DataSource } from 'typeorm'
+import { DataSource } from 'typeorm'
 import { ConflictException, NotFoundException, BadRequestException } from '@nestjs/common'
 
 import { MerchantService } from './merchant.service'
