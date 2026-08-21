@@ -2,6 +2,8 @@
 // AI auto - Content Controller
 // STORY-AI-020: AI 文案生成端点
 // STORY-AI-021: AI 短视频生成端点
+// STORY-AI-022: AI 海报生成端点
+// STORY-AI-023: 多平台一键分发端点
 // ============================================================
 
 import {
@@ -14,6 +16,7 @@ import {
   UseGuards,
   HttpCode,
   HttpStatus,
+  NotFoundException,
 } from '@nestjs/common'
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger'
 
@@ -25,11 +28,13 @@ import { UserRole } from '@ai-auto/shared'
 import { CopywritingService } from './copywriting.service'
 import { VideoService } from './video.service'
 import { PosterService } from './poster.service'
+import { DistributionService } from './distribution.service'
 import {
   GenerateCopywritingDto,
   ConfirmCopywritingDto,
   ListCopywritingDto,
 } from './dto/copywriting.dto'
+import { DistributeContentDto, PublishSingleDto } from './dto/distribution.dto'
 
 @ApiTags('AI 内容 API')
 @Controller('v1/content')
@@ -40,6 +45,7 @@ export class ContentController {
     private readonly copywritingService: CopywritingService,
     private readonly videoService: VideoService,
     private readonly posterService: PosterService,
+    private readonly distributionService: DistributionService,
   ) {}
 
   // ========================
@@ -176,5 +182,36 @@ export class ContentController {
     @Query('pageSize') pageSize = 20,
   ) {
     return this.posterService.listPosters(user.agentId, page, pageSize)
+  }
+
+  // ========================
+  // 多平台分发（STORY-AI-023）
+  // ========================
+
+  @Post('distribute')
+  @Roles(UserRole.AGENT)
+  @ApiOperation({ summary: '一键分发内容到多个平台' })
+  @HttpCode(HttpStatus.OK)
+  async distribute(@CurrentUser() user: { agentId: string }, @Body() dto: DistributeContentDto) {
+    return this.distributionService.distribute(user.agentId, dto)
+  }
+
+  @Post('publish')
+  @Roles(UserRole.AGENT)
+  @ApiOperation({ summary: '发布内容到单个平台' })
+  @HttpCode(HttpStatus.OK)
+  async publishSingle(@CurrentUser() user: { agentId: string }, @Body() dto: PublishSingleDto) {
+    const content = await this.distributionService['contentRepo'].findOne({
+      where: { id: dto.contentId, agentId: user.agentId },
+    })
+    if (!content) {
+      throw new NotFoundException({ code: 9001, message: '内容不存在' })
+    }
+    return this.distributionService.publishToPlatform(
+      user.agentId,
+      content,
+      dto.platform,
+      dto.customContent,
+    )
   }
 }
