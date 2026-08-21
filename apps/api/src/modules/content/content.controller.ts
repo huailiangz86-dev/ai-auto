@@ -1,9 +1,20 @@
 // ============================================================
 // AI auto - Content Controller
 // STORY-AI-020: AI 文案生成端点
+// STORY-AI-021: AI 短视频生成端点
 // ============================================================
 
-import { Controller, Get, Post, Body, Query, UseGuards, HttpCode, HttpStatus } from '@nestjs/common'
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Query,
+  Param,
+  UseGuards,
+  HttpCode,
+  HttpStatus,
+} from '@nestjs/common'
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger'
 
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
@@ -12,18 +23,22 @@ import { Roles } from '../auth/decorators/roles.decorator'
 import { UserRole } from '@ai-auto/shared'
 
 import { CopywritingService } from './copywriting.service'
+import { VideoService } from './video.service'
 import {
   GenerateCopywritingDto,
   ConfirmCopywritingDto,
   ListCopywritingDto,
 } from './dto/copywriting.dto'
 
-@ApiTags('AI 文案 API')
+@ApiTags('AI 内容 API')
 @Controller('v1/content')
 @UseGuards(JwtAuthGuard)
 @ApiBearerAuth()
 export class ContentController {
-  constructor(private readonly copywritingService: CopywritingService) {}
+  constructor(
+    private readonly copywritingService: CopywritingService,
+    private readonly videoService: VideoService,
+  ) {}
 
   // ========================
   // AI 文案（STORY-AI-020）
@@ -66,5 +81,57 @@ export class ContentController {
     @Query() query: ListCopywritingDto,
   ) {
     return this.copywritingService.listCopywriting(user.agentId, query)
+  }
+
+  // ========================
+  // AI 视频（STORY-AI-021）
+  // ========================
+
+  @Post('video/generate')
+  @Roles(UserRole.AGENT)
+  @ApiOperation({ summary: '创建 AI 视频生成任务（异步）' })
+  @HttpCode(HttpStatus.CREATED)
+  async generateVideo(
+    @CurrentUser() user: { agentId: string },
+    @Body()
+    body: {
+      couponId?: string
+      campaignId?: string
+      platform: string
+      durationSeconds?: number
+    },
+  ) {
+    return this.videoService.generateVideo(user.agentId, {
+      couponId: body.couponId,
+      campaignId: body.campaignId,
+      platform: body.platform as any,
+      durationSeconds: body.durationSeconds,
+    })
+  }
+
+  @Get('video/:contentId/status')
+  @Roles(UserRole.AGENT)
+  @ApiOperation({ summary: '查询视频生成进度' })
+  async getVideoStatus(@Param('contentId') contentId: string) {
+    return this.videoService.getJobStatus(contentId)
+  }
+
+  @Get('video/:contentId/sse')
+  @Roles(UserRole.AGENT)
+  @ApiOperation({ summary: '视频生成进度 SSE 订阅（用于 EventSource）' })
+  async getVideoSseChannel(@Param('contentId') contentId: string) {
+    // 返回 SSE 频道名称，前端用此 channel 订阅 Redis pub/sub 或 SSE
+    return { channel: this.videoService.getSseChannel(contentId) }
+  }
+
+  @Get('video')
+  @Roles(UserRole.AGENT)
+  @ApiOperation({ summary: 'AI 视频历史列表' })
+  async listVideos(
+    @CurrentUser() user: { agentId: string },
+    @Query('page') page = 1,
+    @Query('pageSize') pageSize = 20,
+  ) {
+    return this.videoService.listVideos(user.agentId, page, pageSize)
   }
 }
