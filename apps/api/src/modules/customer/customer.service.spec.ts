@@ -14,6 +14,7 @@ import { CustomerAttribution } from './entities/customer-attribution.entity'
 import { CustomerCoupon } from './entities/customer-coupon.entity'
 import { Coupon } from '../campaign/entities/coupon.entity'
 import { SharingAgent } from '../agent/entities/sharing-agent.entity'
+import { Store } from '../merchant/entities/store.entity'
 import { CouponStatus } from '@ai-auto/shared'
 
 function createMockRepo() {
@@ -36,6 +37,7 @@ describe('CustomerService', () => {
   let customerCouponRepo: any
   let dataSource: any
   let agentRepo: any
+  let storeRepo: any
 
   beforeEach(async () => {
     customerRepo = createMockRepo()
@@ -53,6 +55,19 @@ describe('CustomerService', () => {
     agentRepo = {
       ...createMockRepo(),
       findOne: jest.fn().mockResolvedValue({ id: 'agent-123', nickname: '小美' }),
+    }
+    storeRepo = {
+      ...createMockRepo(),
+      createQueryBuilder: jest.fn(() => ({
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        take: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue([]),
+        getManyAndCount: jest.fn().mockResolvedValue([[], 0]),
+      })),
     }
 
     dataSource = {
@@ -72,6 +87,7 @@ describe('CustomerService', () => {
         { provide: getRepositoryToken(CustomerCoupon), useValue: customerCouponRepo },
         { provide: getRepositoryToken(Coupon), useValue: couponRepo },
         { provide: getRepositoryToken(SharingAgent), useValue: agentRepo },
+        { provide: getRepositoryToken(Store), useValue: storeRepo },
         { provide: DataSource, useValue: dataSource },
       ],
     }).compile()

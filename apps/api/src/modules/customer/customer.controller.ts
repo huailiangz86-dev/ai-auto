@@ -27,6 +27,9 @@ import {
   ClaimCouponDto,
   RegisterCustomerDto,
   ListCustomerCouponsDto,
+  DiscoverNearbyDto,
+  ScanClaimDto,
+  SearchMerchantsDto,
 } from './dto/customer.dto'
 
 @ApiTags('客户 API')
@@ -101,5 +104,31 @@ export class CustomerController {
     @Query() query: ListCustomerCouponsDto,
   ) {
     return this.customerService.listCustomerCoupons(user.customerId, query)
+  }
+
+  // ========================
+  // 领券发现（C端 - STORY-AI-016）
+  // ========================
+
+  @Get('discover/nearby')
+  @ApiOperation({ summary: 'LBS 发现附近商家优惠' })
+  async discoverNearby(@Query() query: DiscoverNearbyDto) {
+    return this.customerService.discoverNearbyCoupons(query)
+  }
+
+  @Post('coupons/scan-claim')
+  @UseGuards(JwtAuthGuard)
+  @Roles(UserRole.CUSTOMER)
+  @ApiBearerAuth()
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: '扫码领券' })
+  async scanClaimCoupon(@CurrentUser() user: { customerId: string }, @Body() dto: ScanClaimDto) {
+    return this.customerService.scanClaimCoupon(user.customerId, dto)
+  }
+
+  @Get('search')
+  @ApiOperation({ summary: '搜索商家/品类/关键词' })
+  async searchMerchants(@Query() query: SearchMerchantsDto) {
+    return this.customerService.searchMerchants(query)
   }
 }
