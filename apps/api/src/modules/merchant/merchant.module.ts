@@ -12,6 +12,7 @@ import { AuditLog } from '../admin/entities/audit-log.entity'
 import { CommissionBudget } from './entities/commission-budget.entity'
 import { BudgetTransaction } from './entities/commission-budget.entity'
 import { PlatformRevenue } from './entities/platform-revenue.entity'
+import { MerchantAgentBinding } from './entities/merchant-agent-binding.entity'
 
 import { MerchantController } from './merchant.controller'
 import { MerchantService } from './merchant.service'
@@ -19,9 +20,11 @@ import { MerchantWalletController } from './merchant-wallet.controller'
 import { MerchantWalletService } from './merchant-wallet.service'
 import { AICampaignController } from './ai-campaign.controller'
 import { AICampaignService } from './ai-campaign.service'
+import { MerchantAgentBindingService } from './merchant-agent-binding.service'
 
 import { CampaignModule } from '../campaign/campaign.module'
 import { AIBridgeModule } from '../ai-bridge/ai-bridge.module'
+import { AgentModule } from '../agent/agent.module'
 
 @Module({
   imports: [
@@ -33,12 +36,19 @@ import { AIBridgeModule } from '../ai-bridge/ai-bridge.module'
       CommissionBudget,
       BudgetTransaction,
       PlatformRevenue,
+      MerchantAgentBinding,
     ]),
     CampaignModule,
     AIBridgeModule,
+    AgentModule,
   ],
   controllers: [MerchantController, MerchantWalletController, AICampaignController],
-  providers: [MerchantService, MerchantWalletService, AICampaignService],
-  exports: [MerchantService, MerchantWalletService],
+  providers: [
+    MerchantService,
+    MerchantWalletService,
+    AICampaignService,
+    MerchantAgentBindingService,
+  ],
+  exports: [MerchantService, MerchantWalletService, MerchantAgentBindingService],
 })
 export class MerchantModule {}
