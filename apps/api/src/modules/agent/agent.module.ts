@@ -11,10 +11,11 @@ import { CustomerAttribution } from '../customer/entities/customer-attribution.e
 
 import { AgentReputationService } from './agent-reputation.service'
 import { PlatformOAuthService } from './platform-oauth.service'
+import { AgentController } from './agent.controller'
 
 @Module({
   imports: [TypeOrmModule.forFeature([SharingAgent, AgentPlatformAccount, CustomerAttribution])],
-  controllers: [],
+  controllers: [AgentController],
   providers: [AgentReputationService, PlatformOAuthService],
   exports: [AgentReputationService, PlatformOAuthService, SharingAgent, AgentPlatformAccount],
 })

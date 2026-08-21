@@ -15,6 +15,7 @@ import { CopywritingService } from './copywriting.service'
 import { VideoService } from './video.service'
 import { PosterService } from './poster.service'
 import { DistributionService } from './distribution.service'
+import { DouyinService } from './douyin.service'
 import { ContentController } from './content.controller'
 
 import { AIBridgeModule } from '../ai-bridge/ai-bridge.module'
@@ -27,7 +28,7 @@ import { RedisModule } from '../redis/redis.module'
     RedisModule,
   ],
   controllers: [ContentController],
-  providers: [CopywritingService, VideoService, PosterService, DistributionService],
-  exports: [CopywritingService, VideoService, PosterService, DistributionService],
+  providers: [CopywritingService, VideoService, PosterService, DistributionService, DouyinService],
+  exports: [CopywritingService, VideoService, PosterService, DistributionService, DouyinService],
 })
 export class ContentModule {}
