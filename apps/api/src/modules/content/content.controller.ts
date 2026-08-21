@@ -24,6 +24,7 @@ import { UserRole } from '@ai-auto/shared'
 
 import { CopywritingService } from './copywriting.service'
 import { VideoService } from './video.service'
+import { PosterService } from './poster.service'
 import {
   GenerateCopywritingDto,
   ConfirmCopywritingDto,
@@ -38,6 +39,7 @@ export class ContentController {
   constructor(
     private readonly copywritingService: CopywritingService,
     private readonly videoService: VideoService,
+    private readonly posterService: PosterService,
   ) {}
 
   // ========================
@@ -133,5 +135,46 @@ export class ContentController {
     @Query('pageSize') pageSize = 20,
   ) {
     return this.videoService.listVideos(user.agentId, page, pageSize)
+  }
+
+  // ========================
+  // AI 海报（STORY-AI-022）
+  // ========================
+
+  @Post('poster/generate')
+  @Roles(UserRole.AGENT)
+  @ApiOperation({ summary: '生成 AI 海报' })
+  @HttpCode(HttpStatus.CREATED)
+  async generatePoster(
+    @CurrentUser() user: { agentId: string },
+    @Body()
+    body: {
+      couponId?: string
+      campaignId?: string
+      platform: string
+      style?: string
+      colorScheme?: string
+      variantCount?: number
+    },
+  ) {
+    return this.posterService.generatePoster(user.agentId, {
+      couponId: body.couponId,
+      campaignId: body.campaignId,
+      platform: body.platform as any,
+      style: body.style,
+      colorScheme: body.colorScheme,
+      variantCount: body.variantCount,
+    })
+  }
+
+  @Get('poster')
+  @Roles(UserRole.AGENT)
+  @ApiOperation({ summary: 'AI 海报历史列表' })
+  async listPosters(
+    @CurrentUser() user: { agentId: string },
+    @Query('page') page = 1,
+    @Query('pageSize') pageSize = 20,
+  ) {
+    return this.posterService.listPosters(user.agentId, page, pageSize)
   }
 }

@@ -12,6 +12,7 @@ import { AgentPlatformAccount } from '../agent/entities/agent-platform-account.e
 
 import { CopywritingService } from './copywriting.service'
 import { VideoService } from './video.service'
+import { PosterService } from './poster.service'
 import { ContentController } from './content.controller'
 
 import { AIBridgeModule } from '../ai-bridge/ai-bridge.module'
@@ -24,7 +25,7 @@ import { RedisModule } from '../redis/redis.module'
     RedisModule,
   ],
   controllers: [ContentController],
-  providers: [CopywritingService, VideoService],
-  exports: [CopywritingService, VideoService],
+  providers: [CopywritingService, VideoService, PosterService],
+  exports: [CopywritingService, VideoService, PosterService],
 })
 export class ContentModule {}
