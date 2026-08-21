@@ -23,6 +23,7 @@ import { UserRole } from '@ai-auto/shared'
 
 import { CommissionService } from './commission.service'
 import { SettlementService } from './settlement.service'
+import { RedeemCouponDto, RedeemResultDto, ListRedemptionsDto } from './dto/redeem.dto'
 import { CreateWithdrawalDto, ListWithdrawalsDto } from './dto/withdrawal.dto'
 
 @ApiTags('佣金 API')
@@ -67,6 +68,31 @@ export class CommissionController {
     @Query('pageSize') pageSize = 20,
   ) {
     return this.commissionService.listAgentCommissions(user.agentId, page, pageSize)
+  }
+
+  // ========================
+  // 核销（STORY-AI-017）
+  // ========================
+
+  @Post('redeem')
+  @Roles(UserRole.MERCHANT_ADMIN, UserRole.ADMIN)
+  @ApiOperation({ summary: '商家核销券码' })
+  @HttpCode(HttpStatus.OK)
+  async redeemCoupon(
+    @CurrentUser() user: { merchantId: string },
+    @Body() dto: RedeemCouponDto,
+  ): Promise<RedeemResultDto> {
+    return this.commissionService.redeemCoupon(user.merchantId, dto)
+  }
+
+  @Get('redemptions')
+  @Roles(UserRole.MERCHANT_ADMIN, UserRole.ADMIN)
+  @ApiOperation({ summary: '商家查询核销记录' })
+  async listRedemptions(
+    @CurrentUser() user: { merchantId: string },
+    @Query() query: ListRedemptionsDto,
+  ) {
+    return this.commissionService.listRedemptions(user.merchantId, query)
   }
 
   // ========================

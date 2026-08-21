@@ -10,8 +10,11 @@ import { Repository, DataSource } from 'typeorm'
 
 import { Commission } from './entities/commission.entity'
 import { Redemption } from './entities/redemption.entity'
+import { CustomerCoupon } from '../customer/entities/customer-coupon.entity'
 import { AgentWallet } from '../agent/entities/agent-wallet.entity'
-import { AgentLevel } from '@ai-auto/shared'
+import { AgentLevel, CouponStatus, RedemptionStatus } from '@ai-auto/shared'
+
+import { RedeemCouponDto, RedeemResultDto, ListRedemptionsDto } from './dto/redeem.dto'
 
 // Commission rates
 const PLATFORM_FEE_RATE = 0.2 // 20% platform fee
@@ -35,6 +38,8 @@ export class CommissionService {
     private readonly commissionRepo: Repository<Commission>,
     @InjectRepository(Redemption)
     private readonly redemptionRepo: Repository<Redemption>,
+    @InjectRepository(CustomerCoupon)
+    private readonly customerCouponRepo: Repository<CustomerCoupon>,
     @InjectRepository(AgentWallet)
     private readonly walletRepo: Repository<AgentWallet>,
     private readonly dataSource: DataSource,
@@ -336,6 +341,266 @@ export class CommissionService {
       totalSettled: Number(wallet.totalSettled),
       totalWithdrawn: Number(wallet.totalWithdrawn),
       lastSettlementAt: wallet.lastSettlementAt,
+    }
+  }
+
+  // ========================
+  // 核销（STORY-AI-017）
+  // ========================
+
+  /**
+   * 商家核销券码
+   * 验证 → 创建 Redemption → 触发佣金计算
+   */
+  async redeemCoupon(merchantId: string, dto: RedeemCouponDto): Promise<RedeemResultDto> {
+    const { couponCode, transactionAmount, storeId, merchantTransactionId, presentedAt } = dto
+    const now = new Date()
+
+    // 幂等键：同一个商家+同一交易号只处理一次
+    const idempotencyKey = merchantTransactionId
+      ? `redeem:${merchantId}:${merchantTransactionId}`
+      : `redeem:${merchantId}:${couponCode}:${now.getTime()}`
+
+    // 幂等检查
+    const existingRedemption = await this.redemptionRepo.findOne({
+      where: { idempotencyKey },
+    })
+    if (existingRedemption) {
+      return this.buildRedeemResult(existingRedemption, 'already_processed')
+    }
+
+    // 按 couponCode 查找 CustomerCoupon
+    const customerCoupon = await this.customerCouponRepo.findOne({
+      where: { couponCode },
+    })
+    if (!customerCoupon) {
+      return {
+        redemptionId: '',
+        couponCode,
+        discountValue: 0,
+        success: false,
+        failureReason: '券码不存在或已失效',
+      }
+    }
+
+    // 平台验证
+    const validation = await this.validateForRedemption(customerCoupon, merchantId)
+    if (!validation.valid) {
+      return {
+        redemptionId: '',
+        couponCode,
+        discountValue: 0,
+        success: false,
+        failureReason: validation.reason,
+      }
+    }
+
+    // 计算优惠值
+    const discountValue =
+      Number(customerCoupon.discountAmount ?? 0) > 0
+        ? Number(customerCoupon.discountAmount)
+        : Number(customerCoupon.cashRewardAmount ?? 0)
+
+    // 创建 Redemption 记录
+    const redemptionData: Partial<Redemption> = {
+      idempotencyKey,
+      customerId: customerCoupon.customerId,
+      couponId: customerCoupon.couponId,
+      merchantId,
+      storeId: storeId ?? null,
+      campaignId: null,
+      attributionId: customerCoupon.attributionId ?? null,
+      couponType: customerCoupon.couponType,
+      discountAmount: customerCoupon.discountAmount ?? null,
+      cashRewardAmount: customerCoupon.cashRewardAmount ?? null,
+      transactionAmount,
+      discountValue,
+      agentRewardAmount: discountValue,
+      couponCode,
+      merchantTransactionId: merchantTransactionId ?? null,
+      presentedAt: presentedAt ? new Date(presentedAt) : now,
+      callbackReceivedAt: now,
+      status: RedemptionStatus.PENDING,
+      fraudFlagged: false,
+    }
+    const savedRedemption = await this.redemptionRepo.save(
+      this.redemptionRepo.create(redemptionData),
+    )
+
+    // 标记 CustomerCoupon 为已核销
+    await this.customerCouponRepo.update(
+      { id: customerCoupon.id },
+      { status: CouponStatus.REDEEMED, usedAt: now },
+    )
+
+    // 触发佣金计算
+    const commissionResult = await this.calculateCommission(
+      savedRedemption.id,
+      savedRedemption.idempotencyKey,
+    )
+
+    // 更新 Redemption 记录
+    await this.redemptionRepo.update({ id: savedRedemption.id }, {
+      commissionId: commissionResult.commissionId || null,
+      status: 'verified',
+      verifiedAt: now,
+      verifiedBy: null,
+    } as any)
+
+    // 获取归属分享员信息
+    const attributionInfo = await this.getAttributionInfo(customerCoupon.attributionId)
+
+    this.logger.log({
+      event: 'coupon_redeemed',
+      redemptionId: savedRedemption.id,
+      couponCode,
+      merchantId,
+      discountValue,
+      commissionAgentPayout: commissionResult.agentPayout,
+    })
+
+    return {
+      redemptionId: savedRedemption.id,
+      couponCode,
+      discountValue,
+      success: true,
+      commissionResult:
+        commissionResult.agentPayout > 0
+          ? {
+              commissionId: commissionResult.commissionId,
+              agentPayout: commissionResult.agentPayout,
+              level: attributionInfo.level,
+              multiplier: attributionInfo.multiplier,
+            }
+          : undefined,
+      agentNickname: attributionInfo.nickname,
+      lockDaysRemaining: attributionInfo.lockDaysRemaining,
+    }
+  }
+
+  /**
+   * 商家查询核销记录列表
+   */
+  async listRedemptions(merchantId: string, query: ListRedemptionsDto) {
+    const { status, startDate, endDate, page = 1, pageSize = 20 } = query
+
+    const where: any = { merchantId }
+    if (status) where.status = status
+    if (startDate) where.createdAt = new Date(startDate)
+
+    const [records, total] = await this.redemptionRepo.findAndCount({
+      where,
+      order: { createdAt: 'DESC' },
+      skip: ((page ?? 1) - 1) * (pageSize ?? 20),
+      take: pageSize ?? 20,
+    })
+
+    return {
+      items: records.map((r) => ({
+        redemptionId: r.id,
+        couponCode: r.couponCode,
+        customerId: r.customerId,
+        transactionAmount: Number(r.transactionAmount),
+        discountValue: Number(r.discountValue),
+        status: r.status,
+        createdAt: r.createdAt,
+        verifiedAt: r.verifiedAt,
+        merchantTransactionId: r.merchantTransactionId,
+        failureReason: r.callbackError ?? null,
+      })),
+      pagination: {
+        page: page ?? 1,
+        pageSize: pageSize ?? 20,
+        total,
+        totalPages: Math.ceil(total / (pageSize ?? 20)),
+      },
+    }
+  }
+
+  // ========================
+  // 私有工具
+  // ========================
+
+  /**
+   * 核销前平台验证
+   */
+  private async validateForRedemption(
+    cc: CustomerCoupon,
+    merchantId: string,
+  ): Promise<{ valid: boolean; reason?: string }> {
+    const now = new Date()
+
+    // 1. 券状态
+    if (cc.status === CouponStatus.REDEEMED) {
+      return { valid: false, reason: '优惠券已核销' }
+    }
+    if (cc.status === CouponStatus.EXPIRED) {
+      return { valid: false, reason: '优惠券已过期' }
+    }
+
+    // 2. 有效期
+    if (cc.validFrom && cc.validFrom > now) {
+      return { valid: false, reason: '优惠券尚未生效' }
+    }
+    if (cc.expireAt && cc.expireAt < now) {
+      return { valid: false, reason: '优惠券已过期' }
+    }
+
+    // 3. 商家归属匹配
+    if (cc.merchantId !== merchantId) {
+      return { valid: false, reason: '优惠券不属于当前商家' }
+    }
+
+    return { valid: true }
+  }
+
+  /**
+   * 获取归属分享员信息
+   */
+  private async getAttributionInfo(attributionId: string | null | undefined): Promise<{
+    nickname: string | null
+    level: string
+    multiplier: number
+    lockDaysRemaining: number
+  }> {
+    if (!attributionId) {
+      return { nickname: null, level: 'BRONZE', multiplier: 1.0, lockDaysRemaining: 0 }
+    }
+
+    const attr = await this.redemptionRepo.manager
+      .getRepository('CustomerAttribution')
+      .findOne({ where: { id: attributionId } })
+    if (!attr || !attr.agentId) {
+      return { nickname: null, level: 'BRONZE', multiplier: 1.0, lockDaysRemaining: 0 }
+    }
+
+    const now = new Date()
+    const isExpired = attr.lockExpiredAt && attr.lockExpiredAt < now
+    const daysRemaining = isExpired
+      ? 0
+      : attr.lockExpiredAt
+        ? Math.ceil((attr.lockExpiredAt.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
+        : 365
+
+    return {
+      nickname: null,
+      level: 'BRONZE',
+      multiplier: 1.0,
+      lockDaysRemaining: daysRemaining,
+    }
+  }
+
+  /**
+   * 构建核销结果（幂等返回）
+   */
+  private buildRedeemResult(r: Redemption, reason: string): RedeemResultDto {
+    return {
+      redemptionId: r.id,
+      couponCode: r.couponCode,
+      discountValue: Number(r.discountValue),
+      success: r.status === RedemptionStatus.VERIFIED || r.status === RedemptionStatus.SETTLED,
+      failureReason:
+        reason === 'already_processed' ? '该核销已处理' : (r.callbackError ?? undefined),
     }
   }
 }

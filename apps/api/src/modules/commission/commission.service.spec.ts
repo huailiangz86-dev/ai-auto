@@ -12,6 +12,7 @@ import { CommissionService } from './commission.service'
 import { Commission } from './entities/commission.entity'
 import { Redemption } from './entities/redemption.entity'
 import { AgentWallet } from '../agent/entities/agent-wallet.entity'
+import { CustomerCoupon } from '../customer/entities/customer-coupon.entity'
 
 function createMockRepo() {
   return {
@@ -30,12 +31,28 @@ describe('CommissionService', () => {
   let commissionRepo: any
   let redemptionRepo: any
   let walletRepo: any
+  let customerCouponRepo: any
   let dataSource: any
 
   beforeEach(async () => {
     commissionRepo = createMockRepo()
-    redemptionRepo = createMockRepo()
+    redemptionRepo = {
+      ...createMockRepo(),
+      createQueryBuilder: jest.fn(() => ({
+        update: jest.fn().mockReturnThis(),
+        set: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        execute: jest.fn().mockResolvedValue({ affected: 1 }),
+      })),
+      findAndCount: jest.fn().mockResolvedValue([[], 0]),
+      save: jest.fn((data) => Promise.resolve({ id: 'redemption-1', ...data })),
+    }
     walletRepo = createMockRepo()
+    customerCouponRepo = {
+      ...createMockRepo(),
+      findOne: jest.fn(),
+      update: jest.fn().mockResolvedValue({ affected: 1 }),
+    }
 
     const mockManager = {
       create: jest.fn((_, data) => ({ id: 'comm-1', ...data })),
@@ -54,6 +71,7 @@ describe('CommissionService', () => {
         { provide: getRepositoryToken(Commission), useValue: commissionRepo },
         { provide: getRepositoryToken(Redemption), useValue: redemptionRepo },
         { provide: getRepositoryToken(AgentWallet), useValue: walletRepo },
+        { provide: getRepositoryToken(CustomerCoupon), useValue: customerCouponRepo },
         { provide: DataSource, useValue: dataSource },
       ],
     }).compile()
