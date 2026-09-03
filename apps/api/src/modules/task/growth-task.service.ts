@@ -7,6 +7,7 @@ import { FinancialLedgerEntry } from '../admin/entities/financial-ledger-entry.e
 import { Notification } from '../notification/entities/notification.entity'
 import { SharingAgent } from '../agent/entities/sharing-agent.entity'
 import { PilotInstrumentationService } from '../pilot/pilot-instrumentation.service'
+import { PilotMeasurementService } from '../pilot/pilot-measurement.service'
 import { CreateCreatorTaskDto, CreateGrowthTaskDto } from './dto/growth-task.dto'
 import { CampaignBudgetAllocation } from './entities/campaign-budget-allocation.entity'
 import { CreatorTaskPayout } from './entities/creator-task-payout.entity'
@@ -38,7 +39,6 @@ const CREATOR_TRANSITIONS: Partial<Record<CreatorTaskStatus, CreatorTaskStatus[]
   published: ['tracking'],
   tracking: ['completed'],
   completed: ['settled'],
-
 }
 const GROWTH_TRANSITIONS: Record<GrowthTaskStatus, GrowthTaskStatus[]> = {
   draft: ['ready_for_review', 'cancelled'],
@@ -47,7 +47,6 @@ const GROWTH_TRANSITIONS: Record<GrowthTaskStatus, GrowthTaskStatus[]> = {
   paused: ['active', 'cancelled'],
   completed: [],
   cancelled: [],
-
 }
 
 @Injectable()
@@ -62,6 +61,7 @@ export class GrowthTaskService {
     private readonly allocationRepo: Repository<CampaignBudgetAllocation>,
     private readonly dataSource: DataSource,
     private readonly instrumentation: PilotInstrumentationService,
+    private readonly pilotMeasurement: PilotMeasurementService,
   ) {}
 
   async createGrowthTask(merchantId: string, dto: CreateGrowthTaskDto) {
@@ -93,7 +93,10 @@ export class GrowthTaskService {
       if (!GROWTH_TRANSITIONS[task.status].includes(target))
         throw new BadRequestException(`Growth Task 不能从 ${task.status} 变更为 ${target}`)
       const before = task.status
-      const isRepeatActivation = target === 'active' && await this.instrumentation.hasPriorActivation(manager, merchantId)
+      if (target === 'active' && task.campaignId)
+        await this.pilotMeasurement.assertActivationAllowed(merchantId, task.campaignId)
+      const isRepeatActivation =
+        target === 'active' && (await this.instrumentation.hasPriorActivation(manager, merchantId))
       task.status = target
       await manager.save(task)
       await this.audit(
@@ -105,9 +108,35 @@ export class GrowthTaskService {
         { before, after: target },
       )
       if (target === 'active') {
-        const event = { subjectType: 'growth_task', subjectId: task.id, merchantId: task.merchantId, campaignId: task.campaignId ?? null, growthTaskId: task.id, creatorId: null, creatorTaskId: null, occurredAt: new Date(), metadata: { before, after: target } }
-        await this.instrumentation.record({ ...event, eventType: 'campaign_activated', idempotencyKey: 'pilot:growth-task:' + task.id + ':activated' }, manager)
-        if (isRepeatActivation) await this.instrumentation.record({ ...event, eventType: 'campaign_reinvested', idempotencyKey: 'pilot:growth-task:' + task.id + ':reinvested', metadata: { ...event.metadata, repeatOfExistingGrowthTask: true } }, manager)
+        const event = {
+          subjectType: 'growth_task',
+          subjectId: task.id,
+          merchantId: task.merchantId,
+          campaignId: task.campaignId ?? null,
+          growthTaskId: task.id,
+          creatorId: null,
+          creatorTaskId: null,
+          occurredAt: new Date(),
+          metadata: { before, after: target },
+        }
+        await this.instrumentation.record(
+          {
+            ...event,
+            eventType: 'campaign_activated',
+            idempotencyKey: 'pilot:growth-task:' + task.id + ':activated',
+          },
+          manager,
+        )
+        if (isRepeatActivation)
+          await this.instrumentation.record(
+            {
+              ...event,
+              eventType: 'campaign_reinvested',
+              idempotencyKey: 'pilot:growth-task:' + task.id + ':reinvested',
+              metadata: { ...event.metadata, repeatOfExistingGrowthTask: true },
+            },
+            manager,
+          )
       }
       return task
     })
@@ -259,7 +288,23 @@ export class GrowthTaskService {
         task.id,
         { before, after: 'risk_hold', reason },
       )
-      await this.instrumentation.record({ eventType: 'task_risk_held', idempotencyKey: 'pilot:creator-task:' + task.id + ':risk-hold:' + task.stateChangedAt!.getTime(), subjectType: 'creator_task', subjectId: task.id, merchantId: task.merchantId, campaignId: task.campaignId ?? null, growthTaskId: task.growthTaskId, creatorId: task.creatorId, creatorTaskId: task.id, occurredAt: task.stateChangedAt!, metadata: { before, reason } }, manager)
+      await this.instrumentation.record(
+        {
+          eventType: 'task_risk_held',
+          idempotencyKey:
+            'pilot:creator-task:' + task.id + ':risk-hold:' + task.stateChangedAt!.getTime(),
+          subjectType: 'creator_task',
+          subjectId: task.id,
+          merchantId: task.merchantId,
+          campaignId: task.campaignId ?? null,
+          growthTaskId: task.growthTaskId,
+          creatorId: task.creatorId,
+          creatorTaskId: task.id,
+          occurredAt: task.stateChangedAt!,
+          metadata: { before, reason },
+        },
+        manager,
+      )
       await manager.save(Notification, {
         recipientId: task.creatorId,
         recipientRole: UserRole.AGENT,
@@ -298,7 +343,23 @@ export class GrowthTaskService {
         task.id,
         { before: 'risk_hold', after: target, action, reason },
       )
-      await this.instrumentation.record({ eventType: 'task_risk_resolved', idempotencyKey: 'pilot:creator-task:' + task.id + ':risk-resolved:' + task.stateChangedAt!.getTime(), subjectType: 'creator_task', subjectId: task.id, merchantId: task.merchantId, campaignId: task.campaignId ?? null, growthTaskId: task.growthTaskId, creatorId: task.creatorId, creatorTaskId: task.id, occurredAt: task.stateChangedAt!, metadata: { action, reason, after: target } }, manager)
+      await this.instrumentation.record(
+        {
+          eventType: 'task_risk_resolved',
+          idempotencyKey:
+            'pilot:creator-task:' + task.id + ':risk-resolved:' + task.stateChangedAt!.getTime(),
+          subjectType: 'creator_task',
+          subjectId: task.id,
+          merchantId: task.merchantId,
+          campaignId: task.campaignId ?? null,
+          growthTaskId: task.growthTaskId,
+          creatorId: task.creatorId,
+          creatorTaskId: task.id,
+          occurredAt: task.stateChangedAt!,
+          metadata: { action, reason, after: target },
+        },
+        manager,
+      )
       await manager.save(Notification, {
         recipientId: task.creatorId,
         recipientRole: UserRole.AGENT,
@@ -376,7 +437,26 @@ export class GrowthTaskService {
           remaining: Number(task.campaignCreditsAllocated) - Number(task.campaignCreditsConsumed),
         },
       )
-      await this.instrumentation.record({ eventType: 'campaign_credits_consumed', idempotencyKey: 'pilot:campaign-credit:' + task.id + ':' + sourceReference, subjectType: 'creator_task', subjectId: task.id, merchantId: task.merchantId, campaignId: task.campaignId ?? null, growthTaskId: task.growthTaskId, creatorId: task.creatorId, creatorTaskId: task.id, occurredAt: new Date(), metadata: { amount, sourceReference, remaining: Number(task.campaignCreditsAllocated) - Number(task.campaignCreditsConsumed) } }, manager)
+      await this.instrumentation.record(
+        {
+          eventType: 'campaign_credits_consumed',
+          idempotencyKey: 'pilot:campaign-credit:' + task.id + ':' + sourceReference,
+          subjectType: 'creator_task',
+          subjectId: task.id,
+          merchantId: task.merchantId,
+          campaignId: task.campaignId ?? null,
+          growthTaskId: task.growthTaskId,
+          creatorId: task.creatorId,
+          creatorTaskId: task.id,
+          occurredAt: new Date(),
+          metadata: {
+            amount,
+            sourceReference,
+            remaining: Number(task.campaignCreditsAllocated) - Number(task.campaignCreditsConsumed),
+          },
+        },
+        manager,
+      )
       return {
         creatorTaskId: task.id,
         consumed: Number(task.campaignCreditsConsumed),
@@ -405,10 +485,23 @@ export class GrowthTaskService {
         throw new BadRequestException('发布任务必须提供 publishedUrl')
       if (target === 'accepted') {
         const creator = await manager.findOne(SharingAgent, { where: { id: task.creatorId } })
-        if (!creator || !creator.status || !creator.realNameVerified || creator.auditStatus !== AuditStatus.APPROVED || creator.blacklistedAt || creator.frozenAt)
+        if (
+          !creator ||
+          !creator.status ||
+          !creator.realNameVerified ||
+          creator.auditStatus !== AuditStatus.APPROVED ||
+          creator.blacklistedAt ||
+          creator.frozenAt
+        )
           throw new BadRequestException('创作者尚未通过实名或准入审核，不能接受商业任务')
-        const funded = await manager.find(CampaignBudgetAllocation, { where: { growthTaskId: task.growthTaskId, status: 'funded' } })
-        if (!['creator_payout', 'campaign_credits'].every((category) => funded.some((item) => item.category === category)))
+        const funded = await manager.find(CampaignBudgetAllocation, {
+          where: { growthTaskId: task.growthTaskId, status: 'funded' },
+        })
+        if (
+          !['creator_payout', 'campaign_credits'].every((category) =>
+            funded.some((item) => item.category === category),
+          )
+        )
           throw new BadRequestException('商户资金尚未确认，任务暂不可接受')
         if (task.deadline <= new Date()) throw new BadRequestException('任务邀约已过期')
       }
@@ -429,19 +522,61 @@ export class GrowthTaskService {
         task.compensationLockedAt = new Date()
       }
       await manager.save(task)
-      if (target === 'accepted') await manager.save(CreatorTaskPayout, manager.create(CreatorTaskPayout, { creatorTaskId: task.id, creatorId: task.creatorId, merchantId: task.merchantId, campaignId: task.campaignId ?? null, expectedAmount: Number(task.baseReward), status: 'estimated', verificationEvidence: {} }))
+      if (target === 'accepted')
+        await manager.save(
+          CreatorTaskPayout,
+          manager.create(CreatorTaskPayout, {
+            creatorTaskId: task.id,
+            creatorId: task.creatorId,
+            merchantId: task.merchantId,
+            campaignId: task.campaignId ?? null,
+            expectedAmount: Number(task.baseReward),
+            status: 'estimated',
+            verificationEvidence: {},
+          }),
+        )
       await this.audit(manager, actor, action, 'creator_task', task.id, {
         before,
         after: target,
         compensationLockedAt: task.compensationLockedAt ?? null,
         reviewReason: task.reviewReason ?? null,
       })
-      const eventType = ({ invited: 'task_invited', accepted: 'task_accepted', submitted: 'task_submitted', approved: 'task_reviewed', rejected: 'task_reviewed', published: 'content_published', completed: 'task_completed' } as const)[target]
-      if (eventType) await this.instrumentation.record({
-        eventType, idempotencyKey: 'pilot:creator-task:' + task.id + ':' + target, subjectType: 'creator_task', subjectId: task.id,
-        merchantId: task.merchantId, campaignId: task.campaignId ?? null, growthTaskId: task.growthTaskId, creatorId: task.creatorId, creatorTaskId: task.id, occurredAt: task.stateChangedAt ?? new Date(),
-        metadata: { before, after: target, baseReward: Number(task.baseReward), campaignCreditsAllocated: Number(task.campaignCreditsAllocated), publishedUrl: task.publishedUrl ?? null, reviewDecision: target === 'approved' ? 'approve' : target === 'rejected' ? 'reject' : null },
-      }, manager)
+      const eventType = (
+        {
+          invited: 'task_invited',
+          accepted: 'task_accepted',
+          submitted: 'task_submitted',
+          approved: 'task_reviewed',
+          rejected: 'task_reviewed',
+          published: 'content_published',
+          completed: 'task_completed',
+        } as const
+      )[target]
+      if (eventType)
+        await this.instrumentation.record(
+          {
+            eventType,
+            idempotencyKey: 'pilot:creator-task:' + task.id + ':' + target,
+            subjectType: 'creator_task',
+            subjectId: task.id,
+            merchantId: task.merchantId,
+            campaignId: task.campaignId ?? null,
+            growthTaskId: task.growthTaskId,
+            creatorId: task.creatorId,
+            creatorTaskId: task.id,
+            occurredAt: task.stateChangedAt ?? new Date(),
+            metadata: {
+              before,
+              after: target,
+              baseReward: Number(task.baseReward),
+              campaignCreditsAllocated: Number(task.campaignCreditsAllocated),
+              publishedUrl: task.publishedUrl ?? null,
+              reviewDecision:
+                target === 'approved' ? 'approve' : target === 'rejected' ? 'reject' : null,
+            },
+          },
+          manager,
+        )
       return task
     })
   }

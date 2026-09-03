@@ -37,6 +37,8 @@ import {
   ReplaceCouponProductMappingsDto,
 } from './dto/marketing-product.dto'
 import { MarketingProductService } from './marketing-product.service'
+import { PilotMeasurementService } from '../pilot/pilot-measurement.service'
+import { RegisterCampaignMeasurementProtocolDto } from '../pilot/dto/pilot-measurement.dto'
 
 @ApiTags('营销活动 API')
 @Controller('merchant/campaigns')
@@ -46,6 +48,7 @@ export class CampaignController {
   constructor(
     private readonly campaignService: CampaignService,
     private readonly marketingProductService: MarketingProductService,
+    private readonly pilotMeasurement: PilotMeasurementService,
   ) {}
 
   // ========================
@@ -93,6 +96,17 @@ export class CampaignController {
   ) {
     await this.campaignService.updateCampaign(user.merchantId, campaignId, dto)
     return { code: 0, message: '更新成功' }
+  }
+
+  @Post(':campaignId/measurement-protocol')
+  @Roles(UserRole.MERCHANT_ADMIN)
+  @ApiOperation({ summary: '预登记实验/对照组、基线/观察期及订单/GMV 口径；发布活动前必填' })
+  registerMeasurementProtocol(
+    @CurrentUser() user: { merchantId: string },
+    @Param('campaignId') campaignId: string,
+    @Body() dto: RegisterCampaignMeasurementProtocolDto,
+  ) {
+    return this.pilotMeasurement.register(user.merchantId, campaignId, dto)
   }
 
   @Post(':campaignId/publish')

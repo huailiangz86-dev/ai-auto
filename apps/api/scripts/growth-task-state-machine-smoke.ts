@@ -1,12 +1,17 @@
 import { randomUUID } from 'crypto'
 import dataSource from '../src/data-source'
 import { GrowthTaskService } from '../src/modules/task/growth-task.service'
-import { CampaignCreditLedgerEntry, CreatorTask, GrowthTask } from '../src/modules/task/entities/growth-task.entity'
+import {
+  CampaignCreditLedgerEntry,
+  CreatorTask,
+  GrowthTask,
+} from '../src/modules/task/entities/growth-task.entity'
 import { GrowthPlan } from '../src/modules/task/entities/growth-plan.entity'
 import { CampaignBudgetAllocation } from '../src/modules/task/entities/campaign-budget-allocation.entity'
 import { FinancialLedgerEntry } from '../src/modules/admin/entities/financial-ledger-entry.entity'
 import { PilotInstrumentationService } from '../src/modules/pilot/pilot-instrumentation.service'
 import { PilotMetricEvent } from '../src/modules/pilot/entities/pilot-metric-event.entity'
+import { PilotMeasurementService } from '../src/modules/pilot/pilot-measurement.service'
 
 async function main() {
   await dataSource.initialize()
@@ -39,9 +44,13 @@ async function main() {
         dataSource.getRepository(GrowthTask),
         dataSource.getRepository(CampaignCreditLedgerEntry),
       ),
+      { assertActivationAllowed: async () => undefined } as unknown as PilotMeasurementService,
     )
     const growth = await service.createGrowthTask(merchantId, {
-      goalMetric: 'verified_clicks', baselineValue: 0, targetValue: 100, budget: 200,
+      goalMetric: 'verified_clicks',
+      baselineValue: 0,
+      targetValue: 100,
+      budget: 200,
       startAt: new Date(Date.now() + 60_000).toISOString(),
       endAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
     })
@@ -49,36 +58,84 @@ async function main() {
     await service.moveGrowthTask(merchantId, growthTaskId, 'ready_for_review')
     await service.moveGrowthTask(merchantId, growthTaskId, 'active')
     const creatorTask = await service.createCreatorTask(merchantId, growthTaskId, {
-      creatorId, channel: 'douyin', contentType: 'short_video', brief: 'State machine smoke brief',
-      deadline: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString(), baseReward: 100,
-      campaignCredits: 20, performanceReward: { qualityBonus: 20 }, trackingId: `smoke-${suffix}`,
+      creatorId,
+      channel: 'douyin',
+      contentType: 'short_video',
+      brief: 'State machine smoke brief',
+      deadline: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString(),
+      baseReward: 100,
+      campaignCredits: 20,
+      performanceReward: { qualityBonus: 20 },
+      trackingId: `smoke-${suffix}`,
     })
     creatorTaskId = creatorTask.id
     await service.moveCreatorTaskForMerchant(merchantId, creatorTaskId, 'matching')
     await service.moveCreatorTaskForMerchant(merchantId, creatorTaskId, 'invited')
     const accepted = await service.moveCreatorTaskForCreator(creatorId, creatorTaskId, 'accepted')
-    if (!accepted.compensationLockedAt || Number(accepted.compensationSnapshot?.baseReward) !== 100) {
+    if (
+      !accepted.compensationLockedAt ||
+      Number(accepted.compensationSnapshot?.baseReward) !== 100
+    ) {
       throw new Error('compensation lock was not persisted at acceptance')
     }
-    const consumption = await service.consumeCampaignCredits(creatorId, creatorTaskId, 2, `smoke-${suffix}`)
-    if (consumption.remaining !== 18 || consumption.idempotent) throw new Error('Campaign Credits consumption mismatch')
-    const repeat = await service.consumeCampaignCredits(creatorId, creatorTaskId, 2, `smoke-${suffix}`)
-    if (!repeat.idempotent || repeat.remaining !== 18) throw new Error('Campaign Credits idempotency mismatch')
+    const consumption = await service.consumeCampaignCredits(
+      creatorId,
+      creatorTaskId,
+      2,
+      `smoke-${suffix}`,
+    )
+    if (consumption.remaining !== 18 || consumption.idempotent)
+      throw new Error('Campaign Credits consumption mismatch')
+    const repeat = await service.consumeCampaignCredits(
+      creatorId,
+      creatorTaskId,
+      2,
+      `smoke-${suffix}`,
+    )
+    if (!repeat.idempotent || repeat.remaining !== 18)
+      throw new Error('Campaign Credits idempotency mismatch')
     await service.moveCreatorTaskForCreator(creatorId, creatorTaskId, 'creating')
     await service.moveCreatorTaskForCreator(creatorId, creatorTaskId, 'submitted')
     await service.holdForRisk(creatorTaskId, randomUUID(), 'smoke risk review')
-    const resumed = await service.resolveRiskHold(creatorTaskId, randomUUID(), 'resume', 'smoke cleared')
-    if (resumed.status !== 'submitted') throw new Error('risk hold did not resume previous submitted state')
-    const approved = await service.reviewCreatorTask(creatorTaskId, randomUUID(), 'approve', 'smoke approved')
+    const resumed = await service.resolveRiskHold(
+      creatorTaskId,
+      randomUUID(),
+      'resume',
+      'smoke cleared',
+    )
+    if (resumed.status !== 'submitted')
+      throw new Error('risk hold did not resume previous submitted state')
+    const approved = await service.reviewCreatorTask(
+      creatorTaskId,
+      randomUUID(),
+      'approve',
+      'smoke approved',
+    )
     if (approved.status !== 'approved') throw new Error('review approval failed')
-    const creditEntries = await dataSource.getRepository(CampaignCreditLedgerEntry).count({ where: { creatorTaskId } })
-    const financialEntries = await dataSource.getRepository(FinancialLedgerEntry).count({ where: { creatorTaskId } })
+    const creditEntries = await dataSource
+      .getRepository(CampaignCreditLedgerEntry)
+      .count({ where: { creatorTaskId } })
+    const financialEntries = await dataSource
+      .getRepository(FinancialLedgerEntry)
+      .count({ where: { creatorTaskId } })
     if (creditEntries !== 2 || financialEntries !== 1) throw new Error('ledger evidence mismatch')
-    console.log(JSON.stringify({ ok: true, creatorStatus: approved.status, creditsRemaining: consumption.remaining, creditEntries, financialEntries }))
+    console.log(
+      JSON.stringify({
+        ok: true,
+        creatorStatus: approved.status,
+        creditsRemaining: consumption.remaining,
+        creditEntries,
+        financialEntries,
+      }),
+    )
   } finally {
     if (creatorTaskId) {
-      await dataSource.query(`DELETE FROM campaign_credit_ledger WHERE creator_task_id = $1`, [creatorTaskId])
-      await dataSource.query(`DELETE FROM financial_ledger_entries WHERE creator_task_id = $1`, [creatorTaskId])
+      await dataSource.query(`DELETE FROM campaign_credit_ledger WHERE creator_task_id = $1`, [
+        creatorTaskId,
+      ])
+      await dataSource.query(`DELETE FROM financial_ledger_entries WHERE creator_task_id = $1`, [
+        creatorTaskId,
+      ])
       await dataSource.query(`DELETE FROM audit_logs WHERE target_id = $1`, [creatorTaskId])
       await dataSource.query(`DELETE FROM creator_tasks WHERE id = $1`, [creatorTaskId])
     }
@@ -92,4 +149,7 @@ async function main() {
   }
 }
 
-main().catch((error) => { console.error(error); process.exitCode = 1 })
+main().catch((error) => {
+  console.error(error)
+  process.exitCode = 1
+})

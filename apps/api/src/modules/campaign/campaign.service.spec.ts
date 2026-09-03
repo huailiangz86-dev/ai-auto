@@ -12,6 +12,7 @@ import { Campaign } from './entities/campaign.entity'
 import { Coupon } from './entities/coupon.entity'
 import { Merchant } from '../merchant/entities/merchant.entity'
 import { CampaignType, CouponStatus } from '@ai-auto/shared'
+import { PilotMeasurementService } from '../pilot/pilot-measurement.service'
 
 function createMockRepo() {
   return {
@@ -30,6 +31,7 @@ describe('CampaignService', () => {
   let couponRepo: any
   let merchantRepo: any
   let dataSource: any
+  let pilotMeasurement: any
 
   beforeEach(async () => {
     campaignRepo = createMockRepo()
@@ -38,6 +40,7 @@ describe('CampaignService', () => {
     dataSource = {
       transaction: jest.fn((fn: (manager: any) => Promise<any>) => fn({})),
     }
+    pilotMeasurement = { assertActivationAllowed: jest.fn(), recordCampaignActivation: jest.fn() }
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -46,6 +49,7 @@ describe('CampaignService', () => {
         { provide: getRepositoryToken(Coupon), useValue: couponRepo },
         { provide: getRepositoryToken(Merchant), useValue: merchantRepo },
         { provide: DataSource, useValue: dataSource },
+        { provide: PilotMeasurementService, useValue: pilotMeasurement },
       ],
     }).compile()
 
@@ -274,6 +278,22 @@ describe('CampaignService', () => {
       await expect(service.publishCampaign('merchant-123', 'campaign-1')).rejects.toThrow(
         BadRequestException,
       )
+    })
+
+    it('未预登记测量协议时阻止发布', async () => {
+      campaignRepo.findOne.mockResolvedValueOnce({
+        id: 'campaign-1',
+        campaignStatus: 'draft',
+        coupons: [{ id: 'coupon-1' }],
+      })
+      pilotMeasurement.assertActivationAllowed.mockRejectedValueOnce(
+        new BadRequestException('Campaign 激活前必须预登记'),
+      )
+
+      await expect(service.publishCampaign('merchant-123', 'campaign-1')).rejects.toThrow(
+        BadRequestException,
+      )
+      expect(campaignRepo.save).not.toHaveBeenCalled()
     })
 
     it('发布成功', async () => {

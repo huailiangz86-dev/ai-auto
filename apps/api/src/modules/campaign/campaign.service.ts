@@ -12,6 +12,7 @@ import { Campaign } from './entities/campaign.entity'
 import { Coupon } from './entities/coupon.entity'
 import { Merchant } from '../merchant/entities/merchant.entity'
 import { CouponStatus, CampaignType } from '@ai-auto/shared'
+import { PilotMeasurementService } from '../pilot/pilot-measurement.service'
 
 import {
   CreateCampaignDto,
@@ -34,6 +35,7 @@ export class CampaignService {
     @InjectRepository(Merchant)
     private readonly merchantRepo: Repository<Merchant>,
     private readonly dataSource: DataSource,
+    private readonly pilotMeasurement: PilotMeasurementService,
   ) {}
 
   // ========================
@@ -260,9 +262,11 @@ export class CampaignService {
       })
     }
 
+    await this.pilotMeasurement.assertActivationAllowed(merchantId, campaignId)
     campaign.campaignStatus = 'active'
     campaign.startAt = new Date()
     await this.campaignRepo.save(campaign)
+    await this.pilotMeasurement.recordCampaignActivation(campaign)
 
     this.logger.log({ event: 'campaign_published', campaignId })
     return { code: 0, message: '活动已发布' }
