@@ -12,7 +12,10 @@ import { Merchant } from './entities/merchant.entity'
 import { Store } from './entities/store.entity'
 import { Subscription } from './entities/subscription.entity'
 import { AuditLog } from '../admin/entities/audit-log.entity'
+import { MerchantAgentBinding } from './entities/merchant-agent-binding.entity'
+import { Redemption } from '../commission/entities/redemption.entity'
 import { SubscriptionStatus } from '@ai-auto/shared'
+import { SmsService } from '../auth/services/sms.service'
 
 // Mock repository factory
 function createMockRepo() {
@@ -33,13 +36,19 @@ describe('MerchantService', () => {
   let storeRepo: any
   let subscriptionRepo: any
   let auditLogRepo: any
+  let merchantAgentBindingRepo: any
+  let redemptionRepo: any
   let dataSource: any
+  let smsService: any
 
   beforeEach(async () => {
     merchantRepo = createMockRepo()
     storeRepo = createMockRepo()
     subscriptionRepo = createMockRepo()
     auditLogRepo = createMockRepo()
+    merchantAgentBindingRepo = createMockRepo()
+    redemptionRepo = createMockRepo()
+    smsService = { verifyCode: jest.fn().mockResolvedValue(true) }
     dataSource = {
       transaction: jest.fn((fn: (manager: any) => Promise<any>) => {
         const mockManager = {
@@ -57,7 +66,10 @@ describe('MerchantService', () => {
         { provide: getRepositoryToken(Store), useValue: storeRepo },
         { provide: getRepositoryToken(Subscription), useValue: subscriptionRepo },
         { provide: getRepositoryToken(AuditLog), useValue: auditLogRepo },
+        { provide: getRepositoryToken(MerchantAgentBinding), useValue: merchantAgentBindingRepo },
+        { provide: getRepositoryToken(Redemption), useValue: redemptionRepo },
         { provide: DataSource, useValue: dataSource },
+        { provide: SmsService, useValue: smsService },
       ],
     }).compile()
 
@@ -164,6 +176,18 @@ describe('MerchantService', () => {
       })
     })
 
+    it('返回当前有效绑定的分享员数量', async () => {
+      merchantRepo.findOne.mockResolvedValueOnce(mockMerchant as any)
+      merchantAgentBindingRepo.count.mockResolvedValueOnce(4)
+
+      const result = await service.getProfile('merchant-123')
+
+      expect(result.agentCount).toBe(4)
+      expect(merchantAgentBindingRepo.count).toHaveBeenCalledWith({
+        where: { merchantId: 'merchant-123', bindingStatus: 'active' },
+      })
+    })
+
     it('无活跃订阅时返回 null subscription', async () => {
       merchantRepo.findOne.mockResolvedValueOnce({
         ...mockMerchant,
@@ -218,6 +242,44 @@ describe('MerchantService', () => {
   })
 
   // ========================
+  // ========================
+  // listStores()
+  // ========================
+
+  describe('listStores()', () => {
+    it('返回门店专属与全门店有效分享员的去重数量', async () => {
+      const stores = [
+        { id: 'store-1', storeName: '望京店', status: true, createdAt: new Date('2026-08-01') },
+        { id: 'store-2', storeName: '五道口店', status: true, createdAt: new Date('2026-08-02') },
+      ]
+      storeRepo.findAndCount.mockResolvedValueOnce([stores, 2])
+      merchantAgentBindingRepo.find.mockResolvedValueOnce([
+        { agentId: 'agent-global', storeId: null },
+        { agentId: 'agent-store-1', storeId: 'store-1' },
+        { agentId: 'agent-global', storeId: 'store-1' },
+        { agentId: 'agent-store-2', storeId: 'store-2' },
+        { agentId: null, storeId: 'store-2' },
+      ])
+
+      const result = await service.listStores('merchant-123')
+
+      expect(result.items.map((item) => item.agentCount)).toEqual([2, 2])
+      expect(merchantAgentBindingRepo.find).toHaveBeenCalledWith({
+        where: { merchantId: 'merchant-123', bindingStatus: 'active' },
+        select: ['agentId', 'storeId'],
+      })
+    })
+
+    it('无门店时不查询分享员绑定', async () => {
+      storeRepo.findAndCount.mockResolvedValueOnce([[], 0])
+
+      const result = await service.listStores('merchant-123')
+
+      expect(result.items).toEqual([])
+      expect(merchantAgentBindingRepo.find).not.toHaveBeenCalled()
+    })
+  })
+
   // createStore()
   // ========================
 
@@ -289,6 +351,23 @@ describe('MerchantService', () => {
       await service.deleteStore('merchant-123', 'store-123')
 
       expect(storeRepo.softDelete).toHaveBeenCalledWith('store-123')
+    })
+
+    it('门店已有核销记录时拒绝删除并保留业务数据', async () => {
+      storeRepo.findOne.mockResolvedValueOnce({
+        id: 'store-123',
+        merchantId: 'merchant-123',
+      })
+      redemptionRepo.count.mockResolvedValueOnce(2)
+
+      await expect(service.deleteStore('merchant-123', 'store-123')).rejects.toThrow(
+        BadRequestException,
+      )
+
+      expect(redemptionRepo.count).toHaveBeenCalledWith({
+        where: { merchantId: 'merchant-123', storeId: 'store-123' },
+      })
+      expect(storeRepo.softDelete).not.toHaveBeenCalled()
     })
   })
 

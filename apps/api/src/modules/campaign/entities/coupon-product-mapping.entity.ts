@@ -7,12 +7,13 @@ import { Entity, Column, ManyToOne, JoinColumn, Index } from 'typeorm'
 import { BaseEntity } from '../../common/entities/base.entity'
 import { Coupon } from './coupon.entity'
 import { Merchant } from '../../merchant/entities/merchant.entity'
+import { MarketingProduct, MarketingProductSku } from './marketing-product.entity'
 
 @Entity('coupon_product_mappings')
 @Index('idx_mapping_coupon', ['couponId'])
 @Index('idx_mapping_merchant', ['merchantId'])
 @Index('idx_mapping_external', ['externalProductId'])
-@Index('idx_mapping_merchant_product', ['merchantId', 'externalProductId'], { unique: true })
+@Index('idx_mapping_catalogue_product', ['productId'])
 export class CouponProductMapping extends BaseEntity {
   @Column({ name: 'coupon_id', type: 'uuid' })
   couponId!: string
@@ -20,9 +21,18 @@ export class CouponProductMapping extends BaseEntity {
   @Column({ name: 'merchant_id', type: 'uuid' })
   merchantId!: string
 
+  @Column({ type: 'varchar', length: 20, default: 'legacy_external' })
+  type!: 'catalogue' | 'legacy_external'
+
+  @Column({ name: 'product_id', type: 'uuid', nullable: true })
+  productId?: string | null
+
+  @Column({ name: 'sku_id', type: 'uuid', nullable: true })
+  skuId?: string | null
+
   // Merchant's external product ID in their business system
-  @Column({ name: 'external_product_id', type: 'varchar', length: 100 })
-  externalProductId!: string
+  @Column({ name: 'external_product_id', type: 'varchar', length: 100, nullable: true })
+  externalProductId?: string | null
 
   @Column({ name: 'external_product_name', type: 'varchar', length: 200, nullable: true })
   externalProductName?: string | null
@@ -51,4 +61,12 @@ export class CouponProductMapping extends BaseEntity {
   @ManyToOne('Merchant')
   @JoinColumn({ name: 'merchant_id' })
   merchant!: any
+
+  @ManyToOne(() => MarketingProduct, { nullable: true })
+  @JoinColumn({ name: 'product_id' })
+  product?: MarketingProduct | null
+
+  @ManyToOne(() => MarketingProductSku, { nullable: true })
+  @JoinColumn({ name: 'sku_id' })
+  sku?: MarketingProductSku | null
 }

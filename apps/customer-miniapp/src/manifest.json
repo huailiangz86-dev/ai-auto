@@ -1,0 +1,18 @@
+{
+  "name": "AI auto 优惠",
+  "appid": "__UNI__AIAUTO",
+  "description": "发现、领取和使用附近商家优惠",
+  "versionName": "0.1.0",
+  "versionCode": "100",
+  "transformPx": false,
+  "mp-weixin": {
+    "appid": "",
+    "setting": {
+      "urlCheck": true,
+      "es6": true,
+      "postcss": true,
+      "minified": true
+    },
+    "usingComponents": true
+  }
+}

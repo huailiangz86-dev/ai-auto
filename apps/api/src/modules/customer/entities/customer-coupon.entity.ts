@@ -40,6 +40,21 @@ export class CustomerCoupon extends BaseEntity {
   @Column({ name: 'agent_id', type: 'uuid', nullable: true })
   agentId?: string | null
 
+  // The consumer must opt in before this coupon can be used as Creator
+  // attribution evidence. A withdrawal stops future tracking; verified
+  // transactions retain their accounting record for settlement and fraud review.
+  @Column({ name: 'tracking_consent', type: 'boolean', default: false })
+  trackingConsent!: boolean
+
+  @Column({ name: 'tracking_consent_version', type: 'varchar', length: 32, nullable: true })
+  trackingConsentVersion?: string | null
+
+  @Column({ name: 'tracking_consented_at', type: 'timestamptz', nullable: true })
+  trackingConsentedAt?: Date | null
+
+  @Column({ name: 'tracking_consent_revoked_at', type: 'timestamptz', nullable: true })
+  trackingConsentRevokedAt?: Date | null
+
   // How the customer found this coupon
   @Column({ name: 'source', type: 'varchar', length: 30, default: 'lbs' })
   source!: string // 'share_link' | 'qr_code' | 'lbs' | 'search' | 'wechat_mp'

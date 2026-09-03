@@ -2,10 +2,10 @@
 // JWT Strategy for Passport
 // ============================================================
 
-import { Injectable, UnauthorizedException } from '@nestjs/common';
-import { PassportStrategy } from '@nestjs/passport';
-import { ExtractJwt, Strategy } from 'passport-jwt';
-import { ConfigService } from '@nestjs/config';
+import { Injectable, UnauthorizedException } from '@nestjs/common'
+import { PassportStrategy } from '@nestjs/passport'
+import { ExtractJwt, Strategy } from 'passport-jwt'
+import { ConfigService } from '@nestjs/config'
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
@@ -14,17 +14,22 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
       secretOrKey: configService.get('jwt.secret'),
-    });
+    })
   }
 
   async validate(payload: any) {
     if (!payload.sub) {
-      throw new UnauthorizedException();
+      throw new UnauthorizedException()
     }
     return {
       id: payload.sub,
+      // Merchant controllers use merchantId as their ownership boundary.
+      // A merchant access token's subject is the merchant record itself.
+      merchantId: payload.sub,
+      // Creator/agent access tokens use the same subject convention.
+      agentId: payload.sub,
       username: payload.username,
       role: payload.role,
-    };
+    }
   }
 }

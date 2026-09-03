@@ -27,7 +27,7 @@ import { RegisterMerchantDto, UpdateMerchantProfileDto } from './dto/merchant-re
 import { CreateStoreDto, UpdateStoreDto, ListStoresDto } from './dto/store.dto'
 
 @ApiTags('商户 API')
-@Controller('v1/merchant')
+@Controller('merchant')
 export class MerchantController {
   constructor(private readonly merchantService: MerchantService) {}
 

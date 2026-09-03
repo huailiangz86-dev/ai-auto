@@ -59,6 +59,20 @@ export class Merchant extends BaseEntity {
   @Column({ name: 'audited_at', type: 'timestamptz', nullable: true })
   auditedAt?: Date | null
 
+  // Kept separately from audit status so an approved merchant can still be
+  // temporarily disabled without changing its audit history.
+  @Column({ type: 'boolean', default: true })
+  status!: boolean
+
+  @Column({ name: 'frozen_at', type: 'timestamptz', nullable: true })
+  frozenAt?: Date | null
+
+  @Column({ name: 'frozen_reason', type: 'text', nullable: true })
+  frozenReason?: string | null
+
+  @Column({ name: 'operation_tags', type: 'jsonb', default: () => "'[]'::jsonb" })
+  operationTags!: string[]
+
   // ---- Contact Person ----
   @Column({ name: 'contact_name', type: 'varchar', length: 100, nullable: true })
   contactName?: string | null

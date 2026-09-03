@@ -6,6 +6,7 @@
 import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { Repository, DataSource, LessThanOrEqual, MoreThanOrEqual } from 'typeorm'
+import { Cron } from '@nestjs/schedule'
 
 import { Withdrawal } from './entities/withdrawal.entity'
 import { Commission } from './entities/commission.entity'
@@ -108,6 +109,10 @@ export class SettlementService {
     return { processed: commissions.length, totalAmount }
   }
 
+  @Cron('0 10 0 * * *', { name: 'settle-overdue-commissions', timeZone: 'Asia/Shanghai' })
+  async runDailySettlement(): Promise<void> {
+    await this.settleOverdueCommissions()
+  }
   // ========================
   // 提现申请
   // ========================

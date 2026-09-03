@@ -1,0 +1,28 @@
+{
+  "name": "@ai-auto/customer-miniapp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AI auto C-end coupon mini-program",
+  "scripts": {
+    "dev:mp-weixin": "uni -p mp-weixin",
+    "build:mp-weixin": "uni build -p mp-weixin",
+    "type-check": "vue-tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@dcloudio/uni-app": "3.0.0-alpha-5020520260824002",
+    "@dcloudio/uni-components": "3.0.0-alpha-5020520260824002",
+    "@dcloudio/uni-mp-weixin": "3.0.0-alpha-5020520260824002",
+    "@dcloudio/vite-plugin-uni": "3.0.0-alpha-5020520260824002",
+    "axios": "^1.19.0",
+    "pinia": "2.1.7",
+    "vue": "3.4.21"
+  },
+  "devDependencies": {
+    "@dcloudio/types": "3.4.31",
+    "@uni-helper/uni-app-types": "^1.1.0",
+    "sass": "^1.83.4",
+    "typescript": "^5.7.3",
+    "vite": "5.2.8",
+    "vue-tsc": "^2.2.0"
+  }
+}

@@ -4,15 +4,14 @@
 # ============================================================
 
 from contextlib import asynccontextmanager
-import logging
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 import sentry_sdk
+import structlog
 
 from src.config.settings import settings
 from src.api import router as api_router
-from src.tasks.celery_app import celery_app
 
 # Sentry for error tracking
 if settings.SENTRY_DSN:
@@ -23,16 +22,16 @@ if settings.SENTRY_DSN:
     )
 
 # Structured logging
-structlog = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    structlog.info("ai-agent-service.starting", env=settings.ENV, port=settings.PORT)
+    logger.info("ai-agent-service.starting", env=settings.ENV, port=settings.PORT)
     yield
     # Shutdown
-    structlog.info("ai-agent-service.stopping")
+    logger.info("ai-agent-service.stopping")
 
 
 app = FastAPI(

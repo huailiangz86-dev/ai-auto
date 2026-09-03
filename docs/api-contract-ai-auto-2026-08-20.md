@@ -1525,31 +1525,57 @@ Body:
 
 ### 7.3 运营仪表盘
 
-#### GET /v1/admin/dashboard — 平台总览
+#### GET /v1/admin/dashboard — 平台运营大屏
+
+默认返回平台全量数据；可通过 `merchantId` 或 `agentId` 下钻到商户、分享员维度。`date` 默认为当天，`trendDays` 默认为 14（最大 90）。实时 KPI 建议每 10 秒刷新，趋势和明细按日刷新。
+
+**Query:** `?date=2026-08-20&trendDays=14&merchantId=<uuid>&agentId=<uuid>`
 
 ```json
 {
   "code": 0,
   "data": {
+    "generatedAt": "2026-08-20T15:32:18.000Z",
     "date": "2026-08-20",
+    "scope": {
+      "level": "platform",
+      "merchantId": null,
+      "agentId": null
+    },
     "today": {
-      "new_merchants": 28,
-      "active_agents": 3421,
+      "newMerchants": 28,
+      "activeAgents": 3421,
+      "redemptions": 1234,
       "gmv": 89234.0,
-      "platform_revenue": 17846.8
+      "platformRevenue": 17846.8,
+      "commissionPayout": 35693.0
     },
     "total": {
       "merchants": 1234,
       "agents": 12456,
-      "cumulative_gmv": 12300000.0,
-      "cumulative_revenue": 2400000.0
+      "cumulativeGmv": 12300000.0,
+      "cumulativeRevenue": 2400000.0
     },
-    "monthly_stats": {
-      "new_merchants": 89,
-      "new_agents": 2345,
-      "subscription_renewal_rate": 0.873,
-      "agent_retention_rate": 0.768
-    }
+    "monthly": {
+      "newMerchants": 89,
+      "newAgents": 2345,
+      "subscriptionRenewalRate": 0.873,
+      "agentRetentionRate": 0.768
+    },
+    "trends": {
+      "gmv": [{ "date": "2026-08-20", "value": 89234.0 }],
+      "agentGrowth": [{ "date": "2026-08-20", "value": 28 }],
+      "commissionPayout": [{ "date": "2026-08-20", "value": 35693.0 }],
+      "merchantRetention": [{ "date": "2026-08-20", "value": 0.873 }]
+    },
+    "alerts": {
+      "summary": { "critical": 3, "warning": 12, "notice": 25, "paymentFailures": 0, "systemErrors": 0 },
+      "items": []
+    },
+    "pendingActions": [
+      { "type": "fraud_alert", "count": 28, "action": "review_fraud_alerts" }
+    ],
+    "refresh": { "kpiSeconds": 10, "detail": "daily" }
   }
 }
 ```

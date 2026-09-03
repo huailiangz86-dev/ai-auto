@@ -30,7 +30,7 @@ import {
 } from './dto/wallet.dto'
 
 @ApiTags('商家钱包 API')
-@Controller('v1/merchant/wallet')
+@Controller('merchant/wallet')
 @UseGuards(JwtAuthGuard)
 @ApiBearerAuth()
 export class MerchantWalletController {

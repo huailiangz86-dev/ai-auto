@@ -1,0 +1,3 @@
+const eventName = 'ai-auto:open-publish-drafts'
+const resultEventName = 'ai-auto:extension-result'
+window.addEventListener(eventName, async (event) => { try { const result = await chrome.runtime.sendMessage({ type: 'OPEN_DRAFTS', payload: event.detail }); window.dispatchEvent(new CustomEvent(resultEventName, { detail: result })) } catch (_error) { window.dispatchEvent(new CustomEvent(resultEventName, { detail: { ok: false, message: '发布助手通讯失败，请重新启用插件。' } })) } })

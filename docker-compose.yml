@@ -25,7 +25,7 @@ services:
       POSTGRES_PASSWORD: ai_auto_dev
       POSTGRES_DB: ai_auto_dev
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       # Init scripts (run once on first start)
@@ -116,7 +116,7 @@ services:
       REDIS_PASSWORD: redis_dev_password
       JWT_SECRET: dev-secret-change-in-production
       AI_AGENT_SERVICE_URL: http://ai-agent:8000
-      CORS_ORIGINS: "http://localhost:3000,http://localhost:5173"
+      CORS_ORIGINS: "http://localhost:3100"
     ports:
       - "3000:3000"
     depends_on:

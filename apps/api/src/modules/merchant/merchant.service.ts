@@ -15,8 +15,11 @@ import { Repository, DataSource } from 'typeorm'
 import { Merchant } from './entities/merchant.entity'
 import { Store } from './entities/store.entity'
 import { Subscription } from './entities/subscription.entity'
+import { MerchantAgentBinding } from './entities/merchant-agent-binding.entity'
 import { AuditLog } from '../admin/entities/audit-log.entity'
+import { Redemption } from '../commission/entities/redemption.entity'
 import { AuditStatus, SubscriptionStatus } from '@ai-auto/shared'
+import { SmsService } from '../auth/services/sms.service'
 
 import { RegisterMerchantDto, UpdateMerchantProfileDto } from './dto/merchant-registration.dto'
 import { CreateStoreDto, UpdateStoreDto } from './dto/store.dto'
@@ -34,7 +37,12 @@ export class MerchantService {
     private readonly subscriptionRepo: Repository<Subscription>,
     @InjectRepository(AuditLog)
     private readonly auditLogRepo: Repository<AuditLog>,
+    @InjectRepository(MerchantAgentBinding)
+    private readonly merchantAgentBindingRepo: Repository<MerchantAgentBinding>,
+    @InjectRepository(Redemption)
+    private readonly redemptionRepo: Repository<Redemption>,
     private readonly dataSource: DataSource,
+    private readonly smsService: SmsService,
   ) {}
 
   // ========================
@@ -59,6 +67,11 @@ export class MerchantService {
     }
 
     // 2. 验证短信验证码（简化：直接通过，生产需调用 SMS 服务）
+    const verified = await this.smsService.verifyCode(dto.phone, dto.verificationCode, 'login')
+    if (!verified) {
+      throw new BadRequestException({ code: 1006, message: '验证码错误或已过期' })
+    }
+
     // TODO: 生产环境接入真实 SMS 服务
     if (!dto.verificationCode || dto.verificationCode.length < 4) {
       throw new BadRequestException({
@@ -137,6 +150,9 @@ export class MerchantService {
     const activeSubscription = merchant.subscriptions?.find(
       (s) => s.status === SubscriptionStatus.ACTIVE,
     )
+    const agentCount = await this.merchantAgentBindingRepo.count({
+      where: { merchantId, bindingStatus: 'active' },
+    })
 
     return {
       merchantId: merchant.id,
@@ -159,6 +175,7 @@ export class MerchantService {
         : null,
       apiKey: 'app_•••••••••••••••',
       apiSecretHint: '已设置',
+      agentCount,
       createdAt: merchant.createdAt,
     }
   }
@@ -208,6 +225,26 @@ export class MerchantService {
       take: pageSize,
     })
 
+    // 未指定门店的有效绑定适用于该商户的全部门店；批量查询避免列表的 N+1 计数。
+    const bindings = stores.length
+      ? await this.merchantAgentBindingRepo.find({
+          where: { merchantId, bindingStatus: 'active' },
+          select: ['agentId', 'storeId'],
+        })
+      : []
+    const agentIdsByStore = new Map(stores.map((store) => [store.id, new Set<string>()]))
+    for (const binding of bindings) {
+      if (!binding.agentId) continue
+
+      if (binding.storeId) {
+        agentIdsByStore.get(binding.storeId)?.add(binding.agentId)
+        continue
+      }
+      for (const agentIds of agentIdsByStore.values()) {
+        agentIds.add(binding.agentId)
+      }
+    }
+
     const items = stores.map((s) => ({
       storeId: s.id,
       storeName: s.storeName,
@@ -218,7 +255,7 @@ export class MerchantService {
       contactPhone: s.contactPhone,
       businessHours: s.businessHours,
       status: s.status ? 'active' : 'inactive',
-      agentCount: 0, // TODO: 关联查询
+      agentCount: agentIdsByStore.get(s.id)?.size ?? 0,
       createdAt: s.createdAt,
     }))
 
@@ -342,13 +379,13 @@ export class MerchantService {
       })
     }
 
-    // TODO: 检查是否有核销记录，有则只能暂停
-    // const redemptionCount = await this.redemptionRepo.count({ where: { storeId } });
-    // if (redemptionCount > 0) {
-    //   store.status = false;
-    //   await this.storeRepo.save(store);
-    //   throw new BadRequestException({ code: 2004, message: '该门店已有核销记录，已自动暂停' });
-    // }
+    const redemptionCount = await this.redemptionRepo.count({ where: { merchantId, storeId } })
+    if (redemptionCount > 0) {
+      throw new BadRequestException({
+        code: 2005,
+        message: `该门店已有 ${redemptionCount} 条核销记录，不能删除；请改为停用以保留财务与佣金追溯。`,
+      })
+    }
 
     await this.storeRepo.softDelete(storeId)
 

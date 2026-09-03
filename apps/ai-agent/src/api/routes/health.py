@@ -3,7 +3,7 @@
 # Health Check Routes
 # ============================================================
 
-from fastapi import APIRouter, status
+from fastapi import APIRouter
 from pydantic import BaseModel
 
 from src.config.settings import settings

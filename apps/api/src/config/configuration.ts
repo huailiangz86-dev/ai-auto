@@ -3,62 +3,82 @@
 // Configuration loader
 // ============================================================
 
-import { readFileSync } from 'fs';
-import { join } from 'path';
-import * as yaml from 'js-yaml';
+import { readFileSync } from 'fs'
+import { join } from 'path'
+import * as yaml from 'js-yaml'
 
 export interface AppConfig {
   app: {
-    name: string;
-    env: string;
-    port: number;
-    apiPrefix: string;
-  };
+    name: string
+    env: string
+    port: number
+    apiPrefix: string
+  }
   database: {
-    host: string;
-    port: number;
-    username: string;
-    password: string;
-    name: string;
-    synchronize: boolean;
-    logging: boolean;
-  };
+    host: string
+    port: number
+    username: string
+    password: string
+    name: string
+    schema?: string
+    synchronize: boolean
+    logging: boolean
+  }
   redis: {
-    host: string;
-    port: number;
-    password: string;
-    db: number;
-  };
+    host: string
+    port: number
+    password: string
+    db: number
+  }
   jwt: {
-    secret: string;
-    accessTokenExpiry: string;
-    refreshTokenExpiry: string;
-  };
+    secret: string
+    accessTokenExpiry: string
+    refreshTokenExpiry: string
+  }
   cors: {
-    origins: string[];
-  };
+    origins: string[]
+  }
   throttle: {
-    ttl: number;
-    limit: number;
-  };
+    ttl: number
+    limit: number
+  }
   ai: {
-    agentServiceUrl: string;
-    apiKey: string;
-  };
+    agentServiceUrl: string
+    apiKey: string
+  }
   payment: {
-    alipayAppId: string;
-    wechatpayMchId: string;
-  };
+    alipayAppId: string
+    wechatpayMchId: string
+    alipayPrivateKey: string
+    alipayPublicKey: string
+    alipayNotifyUrl: string
+    wechatpayAppId: string
+    wechatpaySerialNo: string
+    wechatpayPrivateKey: string
+    wechatpayApiV3Key: string
+    wechatpayNotifyUrl: string
+    wechatpayPlatformCertificate: string
+  }
+  wechat: {
+    miniAppId: string
+    miniAppSecret: string
+  }
+  oauth: {
+    douyin: { clientId: string; clientSecret: string }
+    xiaohongshu: { clientId: string; clientSecret: string }
+    wechat: { clientId: string; clientSecret: string }
+    kuaishou: { clientId: string; clientSecret: string }
+  }
 }
 
 export default (): AppConfig => {
-  const env = process.env.NODE_ENV || 'development';
-  const configPath = join(process.cwd(), `config.${env}.yaml`);
+  const env = process.env.NODE_ENV || 'development'
+  const configPath = join(process.cwd(), `config.${env}.yaml`)
 
-  let fileConfig: Partial<AppConfig> = {};
+  let fileConfig: Partial<AppConfig> = {}
   try {
-    const file = readFileSync(configPath, 'utf8');
-    fileConfig = yaml.load(file) as Partial<AppConfig>;
+    const file = readFileSync(configPath, 'utf8')
+    fileConfig = yaml.load(file) as Partial<AppConfig>
   } catch {
     // No yaml config, use env vars only
   }
@@ -76,7 +96,9 @@ export default (): AppConfig => {
       username: process.env.DB_USERNAME || fileConfig.database?.username || 'ai_auto',
       password: process.env.DB_PASSWORD || fileConfig.database?.password || 'ai_auto_dev',
       name: process.env.DB_NAME || fileConfig.database?.name || 'ai_auto_dev',
-      synchronize: process.env.DB_SYNCHRONIZE === 'true' || fileConfig.database?.synchronize || false,
+      schema: process.env.DB_SCHEMA || fileConfig.database?.schema,
+      synchronize:
+        process.env.DB_SYNCHRONIZE === 'true' || fileConfig.database?.synchronize || false,
       logging: process.env.DB_LOGGING === 'true' || fileConfig.database?.logging || false,
     },
     redis: {
@@ -87,23 +109,80 @@ export default (): AppConfig => {
     },
     jwt: {
       secret: process.env.JWT_SECRET || fileConfig.jwt?.secret || 'dev-secret-change-in-production',
-      accessTokenExpiry: process.env.JWT_ACCESS_EXPIRY || fileConfig.jwt?.accessTokenExpiry || '15m',
-      refreshTokenExpiry: process.env.JWT_REFRESH_EXPIRY || fileConfig.jwt?.refreshTokenExpiry || '7d',
+      accessTokenExpiry:
+        process.env.JWT_ACCESS_EXPIRY || fileConfig.jwt?.accessTokenExpiry || '15m',
+      refreshTokenExpiry:
+        process.env.JWT_REFRESH_EXPIRY || fileConfig.jwt?.refreshTokenExpiry || '7d',
     },
     cors: {
-      origins: (process.env.CORS_ORIGINS || fileConfig.cors?.origins?.join(',') || 'http://localhost:3000').split(','),
+      origins: (
+        process.env.CORS_ORIGINS ||
+        fileConfig.cors?.origins?.join(',') ||
+        'http://localhost:3000'
+      ).split(','),
     },
     throttle: {
-      ttl: parseInt(process.env.THROTTLE_TTL || fileConfig.throttle?.ttl?.toString() || '60000', 10),
-      limit: parseInt(process.env.THROTTLE_LIMIT || fileConfig.throttle?.limit?.toString() || '100', 10),
+      ttl: parseInt(
+        process.env.THROTTLE_TTL || fileConfig.throttle?.ttl?.toString() || '60000',
+        10,
+      ),
+      limit: parseInt(
+        process.env.THROTTLE_LIMIT || fileConfig.throttle?.limit?.toString() || '100',
+        10,
+      ),
     },
     ai: {
-      agentServiceUrl: process.env.AI_AGENT_SERVICE_URL || fileConfig.ai?.agentServiceUrl || 'http://localhost:8000',
+      agentServiceUrl:
+        process.env.AI_AGENT_SERVICE_URL ||
+        fileConfig.ai?.agentServiceUrl ||
+        'http://localhost:8000',
       apiKey: process.env.AI_AGENT_API_KEY || fileConfig.ai?.apiKey || '',
     },
     payment: {
       alipayAppId: process.env.ALIPAY_APP_ID || fileConfig.payment?.alipayAppId || '',
       wechatpayMchId: process.env.WECHATPAY_MCH_ID || fileConfig.payment?.wechatpayMchId || '',
+      alipayPrivateKey:
+        process.env.ALIPAY_PRIVATE_KEY || fileConfig.payment?.alipayPrivateKey || '',
+      alipayPublicKey: process.env.ALIPAY_PUBLIC_KEY || fileConfig.payment?.alipayPublicKey || '',
+      alipayNotifyUrl: process.env.ALIPAY_NOTIFY_URL || fileConfig.payment?.alipayNotifyUrl || '',
+      wechatpayAppId: process.env.WECHATPAY_APP_ID || fileConfig.payment?.wechatpayAppId || '',
+      wechatpaySerialNo:
+        process.env.WECHATPAY_SERIAL_NO || fileConfig.payment?.wechatpaySerialNo || '',
+      wechatpayPrivateKey:
+        process.env.WECHATPAY_PRIVATE_KEY || fileConfig.payment?.wechatpayPrivateKey || '',
+      wechatpayApiV3Key:
+        process.env.WECHATPAY_API_V3_KEY || fileConfig.payment?.wechatpayApiV3Key || '',
+      wechatpayNotifyUrl:
+        process.env.WECHATPAY_NOTIFY_URL || fileConfig.payment?.wechatpayNotifyUrl || '',
+      wechatpayPlatformCertificate:
+        process.env.WECHATPAY_PLATFORM_CERTIFICATE ||
+        fileConfig.payment?.wechatpayPlatformCertificate ||
+        '',
     },
-  };
-};
+    wechat: {
+      miniAppId: process.env.WECHAT_MINI_APP_ID || fileConfig.wechat?.miniAppId || '',
+      miniAppSecret: process.env.WECHAT_MINI_APP_SECRET || fileConfig.wechat?.miniAppSecret || '',
+    },
+    oauth: {
+      douyin: {
+        clientId: process.env.DOUYIN_APP_ID || fileConfig.oauth?.douyin?.clientId || '',
+        clientSecret: process.env.DOUYIN_APP_SECRET || fileConfig.oauth?.douyin?.clientSecret || '',
+      },
+      xiaohongshu: {
+        clientId: process.env.XIAOHONGSHU_APP_ID || fileConfig.oauth?.xiaohongshu?.clientId || '',
+        clientSecret:
+          process.env.XIAOHONGSHU_APP_SECRET || fileConfig.oauth?.xiaohongshu?.clientSecret || '',
+      },
+      wechat: {
+        clientId: process.env.WECHAT_OPEN_APP_ID || fileConfig.oauth?.wechat?.clientId || '',
+        clientSecret:
+          process.env.WECHAT_OPEN_APP_SECRET || fileConfig.oauth?.wechat?.clientSecret || '',
+      },
+      kuaishou: {
+        clientId: process.env.KUAISHOU_APP_ID || fileConfig.oauth?.kuaishou?.clientId || '',
+        clientSecret:
+          process.env.KUAISHOU_APP_SECRET || fileConfig.oauth?.kuaishou?.clientSecret || '',
+      },
+    },
+  }
+}

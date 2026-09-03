@@ -35,8 +35,37 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
 
     # AI Providers
+    # Qwen is the default text provider. Anthropic remains an explicit fallback.
+    DEFAULT_LLM_PROVIDER: str = "qwen"
+    LLM_FALLBACK_PROVIDER: str = "doubao"
+    LLM_TIMEOUT_SECONDS: int = 60
+    LLM_MAX_RETRIES: int = 2
+
+    # Alibaba Cloud Model Studio / DashScope
+    DASHSCOPE_API_KEY: Optional[str] = None
+    DASHSCOPE_BASE_URL: str = "https://dashscope.aliyuncs.com/api/v1"
+    DASHSCOPE_TEXT_BASE_URL: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    DASHSCOPE_IMAGE_BASE_URL: str = "https://dashscope.aliyuncs.com/api/v1"
+    QWEN_DEFAULT_MODEL: str = "qwen-plus"
+    QWEN_IMAGE_MODEL: str = "qwen-image-3.0"
+
+    # Volcano Engine Ark / Doubao
+    DOUBAO_API_KEY: Optional[str] = None
+    DOUBAO_BASE_URL: str = "https://ark.cn-beijing.volces.com/api/v3"
+    DOUBAO_DEFAULT_MODEL: str = "doubao-seed-2-0-lite-260215"
+    SEEDANCE_MODEL: str = "doubao-seedance-2-0-260128"
+    SEEDANCE_GENERATE_AUDIO: bool = True
+
+    # Legacy/optional providers
     ANTHROPIC_API_KEY: Optional[str] = None
+    ANTHROPIC_MODEL: str = "claude-3-5-haiku-latest"
     OPENAI_API_KEY: Optional[str] = None
+    OPENAI_BASE_URL: str = "https://api.openai.com/v1"
+    OPENAI_IMAGE_MODEL: str = "gpt-image-1"
+    OPENAI_VIDEO_MODEL: str = "sora-2"
+    # Browser-reachable address used when a completed video is served through
+    # this service. Override it in deployment; localhost is only for local dev.
+    AI_AGENT_PUBLIC_URL: str = "http://localhost:8000"
     KIMI_API_KEY: Optional[str] = None
 
     # RunningHub (AI Video)

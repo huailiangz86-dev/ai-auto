@@ -32,13 +32,21 @@ import {
   ListCampaignsDto,
   ListCouponsDto,
 } from './dto/campaign.dto'
+import {
+  CreateExternalCouponProductMappingDto,
+  ReplaceCouponProductMappingsDto,
+} from './dto/marketing-product.dto'
+import { MarketingProductService } from './marketing-product.service'
 
 @ApiTags('营销活动 API')
-@Controller('v1/merchant/campaigns')
+@Controller('merchant/campaigns')
 @UseGuards(JwtAuthGuard)
 @ApiBearerAuth()
 export class CampaignController {
-  constructor(private readonly campaignService: CampaignService) {}
+  constructor(
+    private readonly campaignService: CampaignService,
+    private readonly marketingProductService: MarketingProductService,
+  ) {}
 
   // ========================
   // 活动管理
@@ -190,6 +198,50 @@ export class CampaignController {
     @Param('couponId') couponId: string,
   ) {
     await this.campaignService.deleteCoupon(user.merchantId, couponId)
+    return { code: 0, message: '删除成功' }
+  }
+
+  @Get('coupons/:couponId/products')
+  @Roles(UserRole.MERCHANT_ADMIN, UserRole.MERCHANT_STAFF)
+  @ApiOperation({ summary: '优惠券商品映射列表' })
+  listCouponProductMappings(
+    @CurrentUser() user: { merchantId: string },
+    @Param('couponId') couponId: string,
+  ) {
+    return this.marketingProductService.listCouponMappings(user.merchantId, couponId)
+  }
+
+  @Put('coupons/:couponId/products')
+  @Roles(UserRole.MERCHANT_ADMIN)
+  @ApiOperation({ summary: '替换优惠券平台营销商品映射' })
+  replaceCouponProductMappings(
+    @CurrentUser() user: { merchantId: string },
+    @Param('couponId') couponId: string,
+    @Body() dto: ReplaceCouponProductMappingsDto,
+  ) {
+    return this.marketingProductService.replaceCatalogueMappings(user.merchantId, couponId, dto)
+  }
+
+  @Post('coupons/:couponId/external-products')
+  @Roles(UserRole.MERCHANT_ADMIN)
+  @ApiOperation({ summary: '添加优惠券外部商品映射' })
+  addExternalCouponProductMapping(
+    @CurrentUser() user: { merchantId: string },
+    @Param('couponId') couponId: string,
+    @Body() dto: CreateExternalCouponProductMappingDto,
+  ) {
+    return this.marketingProductService.addExternalMapping(user.merchantId, couponId, dto)
+  }
+
+  @Delete('coupons/:couponId/external-products/:mappingId')
+  @Roles(UserRole.MERCHANT_ADMIN)
+  @ApiOperation({ summary: '删除优惠券外部商品映射' })
+  async removeExternalCouponProductMapping(
+    @CurrentUser() user: { merchantId: string },
+    @Param('couponId') couponId: string,
+    @Param('mappingId') mappingId: string,
+  ) {
+    await this.marketingProductService.removeExternalMapping(user.merchantId, couponId, mappingId)
     return { code: 0, message: '删除成功' }
   }
 }

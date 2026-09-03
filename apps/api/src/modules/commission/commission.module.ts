@@ -10,13 +10,22 @@ import { Commission } from './entities/commission.entity'
 import { Redemption } from './entities/redemption.entity'
 import { Withdrawal } from './entities/withdrawal.entity'
 import { AgentWallet } from '../agent/entities/agent-wallet.entity'
+import { CustomerCoupon } from '../customer/entities/customer-coupon.entity'
+import { GamificationModule } from '../gamification/gamification.module'
+import { TaskModule } from '../task/task.module'
+import { PilotInstrumentationModule } from '../pilot/pilot-instrumentation.module'
 
 import { CommissionController } from './commission.controller'
 import { CommissionService } from './commission.service'
 import { SettlementService } from './settlement.service'
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Commission, Redemption, Withdrawal, AgentWallet])],
+  imports: [
+    TypeOrmModule.forFeature([Commission, Redemption, Withdrawal, AgentWallet, CustomerCoupon]),
+    GamificationModule,
+    TaskModule,
+    PilotInstrumentationModule,
+  ],
   controllers: [CommissionController],
   providers: [CommissionService, SettlementService],
   exports: [CommissionService, SettlementService],

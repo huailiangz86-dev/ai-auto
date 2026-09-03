@@ -1,9 +1,9 @@
 # Product Requirements Document: AI auto
 
-**Date:** 2026-08-20
+**Date:** 2026-09-01
 **Author:** zhang
-**Version:** 1.0
-**Project Type:** AI-native sharing agent distribution tool (SaaS, tool-only, no e-commerce store)
+**Version:** 2.0
+**Project Type:** AI-native local growth network (Merchant Growth + Creator Network + AI Creator Studio + Transaction Attribution)
 **Project Level:** 3
 **Status:** Draft
 
@@ -11,33 +11,33 @@
 
 ## Document Overview
 
-This PRD defines the functional and non-functional requirements for **AI auto** — an AI-native sharing agent distribution tool that helps merchants acquire customers through social裂变 (viral sharing) via WeChat, Douyin, Xiaohongshu, and other platforms.
+This PRD defines the functional and non-functional requirements for **AI auto** — an AI-native local growth network. It connects merchant growth demand with local content creators (Creators), uses AI to complete matching and content production, and verifies results through transaction attribution.
 
 **Related Documents:**
 - Brainstorming: `docs/brainstorming-ai-auto-2026-08-19.md`
 - Project Overview: `memory/ai-auto-project-overview.md`
+- Business-model update: `13_双边增长网络与商业模式需求更新方案.md` (2026-09-01)
 
 ---
 
 ## Executive Summary
 
-AI auto is a pure tool platform that helps merchants acquire customers through a sharing agent (分享员) model. Unlike traditional SaaS platforms (有赞/微盟), it does NOT provide e-commerce store functionality. Unlike KOL/influencer marketing platforms, it targets ordinary users sharing within their personal social circles (朋友圈/社群/私聊), not professional content creators.
+AI auto is not merely an AI marketing tool or a merchant-to-consumer coupon product. It is a two-sided local growth network: merchants buy a verifiable growth outcome; Creators receive matched, funded tasks and use AI to complete them efficiently; consumer reads, clicks, transactions and redemptions become the attribution evidence.
 
-The core differentiator is **AI-native automation**: AI generates promotional content, AI creates marketing campaigns from natural language, and AI Agent handles most operations automatically — a capability no direct competitor currently offers.
+The core differentiator is the closed loop of **Growth Task → AI strategy → Creator matching → Creator Task → AI Creator Studio → distribution → transaction verification → attribution → Merchant ROI + Creator Score**. The platform does not operate an e-commerce store or customer payment flow.
 
-**Business Model:**
-- Merchant subscription: ¥1,200/store/year (fixed, no tiers)
-- Merchant prepaid commission budget (digital wallet model)
-- Sharing agent commission: Platform takes 20% from agent's earnings, agent keeps 80%, settlement T+3, minimum withdrawal ¥10
-- AI token billing: borne by sharing agent (deducted from commission), not passed to merchant
-- Lock period: 365 days (same as competitors)
-- Distribution: Single-level only (compliance requirement)
-- Agent can bind unlimited accounts across unlimited merchants
+**Business Model (source of truth):**
+- **Merchant Growth Revenue (P0):** Campaign/Growth service fee, transaction commission and performance fee. Subscription is an optional later packaging model rather than the only entry point.
+- **Creator Payout is COGS:** base reward, quality bonus and performance commission are direct fulfilment costs, never platform revenue.
+- **Creator AI Revenue (P1):** Creator Pro and Creator Credits apply only to a Creator's self-operated work. Merchant-funded commercial tasks include Campaign Credits and must not charge the Creator first.
+- **Growth API / Enterprise Revenue (P1/P2):** API, GMV/package and enterprise capability revenue.
+- **Attribution:** retain the 365-day lock mechanism where applicable, but report verified and incremental business value rather than claiming all attributed revenue as incrementality.
+- **Distribution:** single-level only; Creators may bind multiple eligible accounts and work with multiple merchants.
 
 **Business Objectives:**
-- 500 paying merchants within 12 months
-- Millions of sharing impressions
-- Revenue streams: subscription fees + agent commission 20% + AI token billing
+- Prove merchants will pay for Growth Tasks that produce verifiable new customers, incremental orders or incremental GMV.
+- Build a reliable supply of local Creators who repeatedly accept, complete and publish funded tasks.
+- Use AI to reduce the time and cost of completing high-quality commercial content without making paid credits a barrier to task participation.
 
 ---
 
@@ -45,20 +45,169 @@ The core differentiator is **AI-native automation**: AI generates promotional co
 
 ### Business Objectives
 
-1. **Monetization**: Achieve 500 paying merchant subscriptions within 12 months
-2. **Sharing Scale**: Generate millions of sharing impressions through sharing agents
-3. **Market Position**: Establish AI auto as the leading AI-native sharing distribution tool in China, ahead of competitors before Tencent's native AI Agent closes the window (estimated 2-3 years)
+1. **Validated Growth**: Prove that merchants will pay for Growth Tasks that produce verifiable new customers, incremental orders or incremental GMV.
+2. **Two-sided Liquidity**: Build a reliable supply of local Creators who repeatedly accept, complete and publish funded tasks.
+3. **Creator Leverage**: Use AI to reduce the time and cost of completing high-quality commercial content without making paid credits a barrier to task participation.
+4. **Market Position**: Establish AI auto as the leading AI-native local growth network in China.
 
 ### Success Metrics (to be finalized)
-- Paying merchant count
-- Active sharing agent count
-- Monthly sharing impressions
-- Merchant retention rate
-- Agent commission payout volume
+- AI Incremental GMV (platform north-star metric)
+- First Campaign Activation / First Attributed Order / First Incremental Order
+- Repeat Campaign Rate, Budget Expansion Rate and Store Expansion Rate
+- Creator Activation, Task Acceptance Rate, Task Completion Rate and Repeat Task Rate
+- Verified Creator GMV / Verified Creator Orders / Creator Earnings
+- Merchant ROI, Creator retention and Creator Pro/Credits conversion (the last only after task-market validation)
 
 ---
 
 ## Functional Requirements
+
+### v2.0 Requirement Authority and Terminology
+
+The following v2.0 requirements are the implementation source of truth. The v1.0 FR-001–FR-040 text remains below for historical traceability only; where it conflicts with v2.0, v2.0 prevails. Public product language changes from **Sharing Agent/分享员** to **Creator/达人**. Existing technical identifiers may be migrated incrementally, but new user-facing copy, APIs and analytics must use Creator terminology.
+
+| v1.0 concept | v2.0 decision |
+|---|---|
+| Fixed ¥1,200/year subscription | Optional later packaging; P0 entry is a funded Growth Task/Campaign with service and/or outcome-based charging. |
+| Merchant buys agent count, content count or impressions | Merchant buys a growth goal, a budget and verifiable ROI. |
+| Agent commission is revenue split (20% platform / 80% agent) | Creator Payout is COGS; payout supports base reward + quality bonus + performance commission. Platform revenue is recorded separately. |
+| Agent pays AI token cost for commercial task | Merchant-funded Creator Tasks include Campaign Credits. Personal account operation may use paid Creator Pro/Credits. |
+| Reputation based only on valid customer count | Creator Growth Score uses Influence, Quality, Relevance, Conversion and Trust. |
+| Consumer sharing implicitly turns the user into an agent | Consumer sharing remains optional; paid Creator work requires a Creator account, eligibility and an accepted task. |
+
+### FR-041: Merchant Growth Task and AI Growth Plan
+
+**Priority:** Must Have (P0)
+
+The system shall let a merchant state a business growth goal, budget, time window and store scope in natural language. AI shall propose the offer, target audience, channel/Creator strategy, expected result range and a reviewable Growth Plan before execution.
+
+**Acceptance Criteria:**
+- [ ] Merchant starts with “what do you want to grow?” rather than selecting Creator count or content quantity.
+- [ ] A Growth Task records goal metric, baseline, target, budget, time window, store scope and acceptable risk/ROI boundary.
+- [ ] AI returns alternatives with assumptions, expected outcome ranges and budget allocation; merchant approval is required before activation.
+- [ ] The approved plan produces linked Campaign, Creator-matching and attribution work items.
+
+### FR-042: Creator Identity, Verification and Account Profile
+
+**Priority:** Must Have (P0)
+
+The system shall maintain an independent Creator supply network, with identity/eligibility verification, local relevance, content categories and connected platform accounts.
+
+**Acceptance Criteria:**
+- [ ] Creator onboarding captures verified identity, region, categories, account data and task preferences.
+- [ ] Merchant verification, confirmed budget and task rules are visible to Creators before acceptance.
+- [ ] Creator can connect multiple eligible platform accounts and sees account authorization status.
+- [ ] Operations can approve, suspend, blacklist and retain an auditable verification decision.
+
+### FR-043: Creator Matching and Invitation
+
+**Priority:** Must Have (P0)
+
+The system shall rank and invite Creators based on local relevance and verified growth value, not follower count alone.
+
+**Acceptance Criteria:**
+- [ ] Matching uses location, category, audience relevance, Creator Growth Score, capacity, historic conversion and trust signals.
+- [ ] Merchant sees AI-recommended Creator strategy and expected contribution, rather than a mandatory manual Creator package selection.
+- [ ] Creators can browse eligible recommended tasks; invitations and declines are recorded.
+- [ ] Matching is explainable through the factors used and is auditable for operations.
+
+### FR-044: Creator Task Lifecycle
+
+**Priority:** Must Have (P0)
+
+The system shall create a Creator Task for each assigned Creator/Campaign/channel combination and enforce a tracked lifecycle.
+
+**Acceptance Criteria:**
+- [ ] Task fields include Campaign, merchant, store, Creator, channel, content type, brief, deadline, base reward, performance reward, Campaign Credits, tracking ID and published URL.
+- [ ] Valid states are CREATED → MATCHING → INVITED → ACCEPTED → CREATING → SUBMITTED → APPROVED → PUBLISHED → TRACKING → COMPLETED → SETTLED.
+- [ ] REJECTED, EXPIRED, CANCELLED and VIOLATION states capture reason, actor and timestamp.
+- [ ] A Creator sees today’s earning opportunities, estimated reward, active tasks, pending settlement and task progress.
+
+### FR-045: AI Creator Studio
+
+**Priority:** Must Have (P0 for text; P1 for image/video)
+
+The system shall use merchant knowledge, task brief, Creator style, target audience and local GEO context to help a Creator complete an accepted task.
+
+**Acceptance Criteria:**
+- [ ] P0 supports task-brief understanding, merchant knowledge retrieval, topic/title/body generation, rewrite, content scoring, GEO keyword suggestions and publishing guidance.
+- [ ] Creator can edit and approve all generated material before submission or publication.
+- [ ] P1 adds image generation, video scripts/video generation, style learning, performance prediction and platform adaptation.
+- [ ] Commercial-task generation consumes Campaign Credits first and never blocks an accepted task because the Creator lacks personal Credits.
+
+### FR-046: Creator Credits and Creator Pro
+
+**Priority:** Should Have (P1)
+
+The system shall maintain separate credit ledgers and billing policies for merchant-funded tasks and a Creator’s self-operated work.
+
+**Acceptance Criteria:**
+- [ ] Campaign Credits are funded by the merchant Growth Budget and restricted to the linked Creator Task.
+- [ ] Personal Creator Credits and Creator Pro are optional products for non-task creation/account operation.
+- [ ] Ledger entries state payer, purpose, model/service cost, balance change and related task/content ID.
+- [ ] Revenue reporting excludes Campaign Credits funded as a merchant delivery cost from Creator AI Revenue.
+
+### FR-047: Creator Growth Score
+
+**Priority:** Must Have (P0)
+
+The system shall calculate a Creator Growth Score and L1–L5 level from Influence, Quality, Relevance, Conversion and Trust.
+
+**Acceptance Criteria:**
+- [ ] Score inputs include audience/content performance, local and category relevance, verified clicks/orders/redemptions, delivery quality, violations, refunds and disputes.
+- [ ] Score/level affects task eligibility, invitation priority, base-price range, performance rate, matching probability and traffic weight.
+- [ ] Creator sees score breakdown, current level, next-level path and dispute/correction route.
+- [ ] The ranking does not use follower count as the sole or primary business-value signal.
+
+### FR-048: Creator Payout, Settlement and Transparency
+
+**Priority:** Must Have (P0)
+
+The system shall calculate Creator Payout as fulfilment cost and settle verified task outcomes transparently.
+
+**Acceptance Criteria:**
+- [ ] Each payout separates base reward, quality bonus, click/order/redemption performance commission, adjustments and withholding/reserve.
+- [ ] Creator Payout is booked as COGS; Merchant Growth Revenue, transaction/performance revenue and gross profit are separate ledger categories.
+- [ ] Creator sees estimated reward, calculation rule, evidence, settlement date, status and appeal route before and after publication.
+- [ ] Settlement remains T+3 business days after verified eligible events, subject to fraud/risk review and immutable audit records.
+
+### FR-049: Campaign Unit Economics and Merchant ROI
+
+**Priority:** Must Have (P0)
+
+The system shall allocate a merchant Growth Budget and report campaign economics and ROI with explicit cost/revenue classification.
+
+**Acceptance Criteria:**
+- [ ] Budget allocation records Creator Payout, AI/model cost, channel cost, consumer incentive, platform gross margin and risk reserve.
+- [ ] Merchant sees goal progress, new customers, incremental orders, incremental GMV, verified orders/redemptions, spend and ROI.
+- [ ] Operations can reconcile budget, revenue, COGS and gross profit at Campaign and platform level.
+- [ ] A budget or payout change is auditable and cannot silently change an accepted task’s compensation rule.
+
+### FR-050: Verified and Incremental Attribution
+
+**Priority:** Must Have (P0)
+
+The system shall trace content exposure through verified transactions while distinguishing attribution from measured incrementality.
+
+**Acceptance Criteria:**
+- [ ] Events connect Creator Task, content/publication, tracking ID, consumer, order/redemption, verification and payout.
+- [ ] 365-day lock attribution is preserved where applicable, with first-touch evidence and fraud controls.
+- [ ] Reporting labels verified attributed result separately from incremental result and exposes the method/assumptions for incrementality.
+- [ ] Merchant and Creator views use the same underlying transaction evidence with role-appropriate privacy controls.
+
+### FR-051: Marketplace Trust, Quality and Disputes
+
+**Priority:** Must Have (P0)
+
+The system shall protect both sides of the network with transparent rules, content review, fraud controls and a dispute process.
+
+**Acceptance Criteria:**
+- [ ] Creator sees merchant verification, confirmed budget, task brief, compensation rule and estimated settlement timing before acceptance.
+- [ ] Merchant sees Creator verification, Creator Growth Score, local relevance and historic verified performance before approval.
+- [ ] Content, task and payout violations can pause publication/settlement and create an operations case with evidence.
+- [ ] Both merchant and Creator can submit a time-bounded dispute; final decision, adjustment and audit trail are immutable.
+
+### Legacy v1.0 Functional Requirements (reference only)
 
 ### FR-001: Merchant Subscription & Account Management
 
@@ -876,6 +1025,22 @@ The system shall be observable for debugging and monitoring.
 
 ## Epics
 
+### v2.0 Epic Model (implementation source of truth)
+
+| Epic | Scope | Primary FRs | Priority |
+|---|---|---|---|
+| EPIC-V2-001 Merchant Growth | Growth Task, AI plan, budget, unit economics and merchant ROI | FR-041, FR-049, FR-050 | P0 |
+| EPIC-V2-002 Creator Network | Creator identity, verification, profiles, accounts and trust | FR-042, FR-047, FR-051 | P0 |
+| EPIC-V2-003 Creator Marketplace | Matching, invitation, task lifecycle and Creator Home | FR-043, FR-044 | P0 |
+| EPIC-V2-004 AI Creator Studio | Task-aware creation, knowledge, quality and publishing guidance | FR-045, FR-046 | P0/P1 |
+| EPIC-V2-005 Attribution & Settlement | Verified transaction evidence, payout, settlement and disputes | FR-048, FR-050, FR-051 | P0 |
+| EPIC-V2-006 Distribution & Channels | Platform accounts, publication and performance ingestion | FR-013, FR-014, FR-028–FR-031 | P0/P1 |
+| EPIC-V2-007 Operations & Growth API | Risk, review, data governance, Growth API and enterprise capability | FR-021–FR-027, FR-051 | P0/P1 |
+
+The v1.0 Epic list below is retained only to trace existing implementation; it must not be used to prioritize new work without mapping to this v2.0 model.
+
+### Legacy v1.0 Epics (reference only)
+
 ### EPIC-001: Merchant Onboarding & Subscription
 
 **Description:**
@@ -1097,7 +1262,26 @@ Gamification increases sharing frequency and platform retention, but not critica
 
 ---
 
-## User Personas
+## v2.0 User Personas and Product Views
+
+### Persona 1: Merchant Growth Owner
+- **Primary job:** State a growth goal and budget, approve an AI Growth Plan, then evaluate verified/incremental result and decide whether to repeat or expand spend.
+- **Primary view:** goal progress, new customers, incremental orders/GMV, verified results, spend, ROI, active Campaign and AI next step.
+- **Does not need to do by default:** manually select follower counts, content quantities, platform keywords, commission rules or Creator package.
+
+### Persona 2: Local Creator
+- **Primary job:** Find reliable earning opportunities, accept suitable tasks, create/publish with AI help, and receive transparent settlement.
+- **Primary view:** today’s available tasks, estimated earnings, active/pending tasks, pending settlement, Creator Growth Score, level, accounts and optional personal Credits.
+- **Trust needs:** verified merchant, confirmed budget, clear brief/rules, transparent calculation and a dispute route.
+
+### Persona 3: Consumer
+- **Primary job:** discover a useful offer, consume it and receive privacy-respecting value.
+- **Primary view:** offer, merchant/store, terms, coupon and consent/privacy controls. Consumer sharing does not automatically create a paid Creator account.
+
+### Persona 4: Operations Manager
+- **Primary job:** maintain a liquid, trustworthy marketplace and reconcile Growth Revenue, COGS, gross profit, attribution, risk and disputes.
+
+### Legacy v1.0 User Personas (reference only)
 
 ### Persona 1: Small Restaurant Owner (Merchant)
 - **Age:** 30-50
@@ -1128,7 +1312,24 @@ Gamification increases sharing frequency and platform retention, but not critica
 
 ---
 
-## User Flows
+## v2.0 Core Growth Flow
+
+```
+Merchant states growth goal + budget
+→ AI returns reviewable Growth Plan and Campaign Unit Economics
+→ Creator Matching ranks and invites eligible local Creators
+→ Creator accepts a funded Creator Task (Campaign Credits included)
+→ AI Creator Studio produces editable, task-aware content
+→ Content review and distribution
+→ Consumer interaction / verified order or redemption
+→ Attribution and incrementality measurement
+→ Creator Payout settlement + Creator Growth Score update
+→ Merchant ROI view → repeat campaign / budget expansion
+```
+
+**P0 experiment boundary:** validate 10 real merchants, 50 local Creators, 30 Campaigns and 100 published items; the proof points are repeat merchant spend, repeat Creator task acceptance, verified orders/redemptions and credible incrementality evidence.
+
+### Legacy v1.0 User Flows (reference only)
 
 ### Flow 1: Merchant Campaign Lifecycle
 
@@ -1203,7 +1404,17 @@ Gamification increases sharing frequency and platform retention, but not critica
 
 ---
 
-## Assumptions
+## v2.0 Assumptions and Commercial Guardrails
+
+1. P0 validates a managed local supply/demand launch before attempting open-market scale.
+2. Merchant-funded Campaign Credits cover AI work required to complete an accepted commercial Creator Task.
+3. Creator Pro and personal Credits remain optional and are not an activation gate for task participation.
+4. Creator Payout is always reported as COGS, separately from Merchant Growth Revenue, transaction/performance revenue and gross profit.
+5. Attribution and incrementality are distinct metrics; every incrementality claim must disclose its method and assumptions.
+6. The existing 365-day lock may support eligible attribution but does not eliminate fraud control, verification, consent or privacy obligations.
+7. The public product uses Creator terminology; storage/API migration from legacy Agent identifiers is staged and backward-compatible.
+
+### Legacy v1.0 Assumptions (reference only)
 
 1. Merchants have existing business systems (POS/ERP) that can call the platform's verification API within 72 hours
 2. Sharing agents are individuals, not businesses (simplifies tax compliance — agents handle their own taxes)
@@ -1240,7 +1451,17 @@ The following are explicitly NOT part of this project:
 
 ---
 
-## Open Questions
+## v2.0 Resolved Commercial Decisions
+
+| Topic | v2.0 decision |
+|---|---|
+| Merchant entry model | P0 is a funded, result-oriented Growth Task/Campaign; subscription is a later packaging option. |
+| Creator AI billing | Commercial task creation uses Campaign Credits; personal creation may use Creator Pro/Credits. |
+| Creator compensation | Base reward + quality bonus + performance commission; Creator Payout is COGS, not revenue. |
+| Outcome measurement | Show verified attribution and incrementality separately, including method and assumptions. |
+| Marketplace trust | Merchant/Creator verification, confirmed budget/rules, content/risk review and time-bounded disputes are mandatory P0 controls. |
+
+### Legacy v1.0 Open Questions (reference only)
 
 The following questions have been resolved based on stakeholder feedback:
 
@@ -1281,6 +1502,7 @@ The following questions have been resolved based on stakeholder feedback:
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 1.0 | 2026-08-20 | zhang | Initial PRD |
+| 2.0 | 2026-09-01 | zhang | Repositioned product as a two-sided local growth network; added Growth Task, Creator network/task/score/credits, COGS payout, unit economics and verified incremental attribution requirements. |
 
 ---
 
@@ -1311,7 +1533,19 @@ After architecture is complete, run `/bmad:sprint-planning` to:
 
 ---
 
-## Appendix A: Requirements Traceability Matrix
+## Appendix A: v2.0 Requirements Traceability Matrix
+
+| Business change | Replaces or constrains v1.0 | v2.0 source of truth |
+|---|---|---|
+| Growth outcome rather than creator/package sale | FR-001, FR-003, FR-018 | FR-041, FR-049, FR-050 |
+| Independent local Creator network | FR-005, FR-009, FR-014, FR-038 | FR-042, FR-043, FR-047 |
+| Task market and task delivery | FR-005, FR-010–FR-013 | FR-044, FR-045 |
+| Campaign-funded versus personal AI use | FR-010–FR-012 | FR-045, FR-046 |
+| Creator Payout is COGS | FR-007, FR-008, FR-024 | FR-048, FR-049 |
+| Verified and incremental growth reporting | FR-006, FR-016, FR-018 | FR-050 |
+| Two-sided trust and appeals | FR-021–FR-025 | FR-051 |
+
+## Appendix A (Legacy): Requirements Traceability Matrix
 
 | Epic ID | Epic Name | Functional Requirements | Story Count (Est.) |
 |---------|-----------|-------------------------|-------------------|
@@ -1332,7 +1566,7 @@ After architecture is complete, run `/bmad:sprint-planning` to:
 
 ---
 
-## Appendix B: Prioritization Details
+## Appendix B (Legacy): v1.0 Prioritization Details
 
 | Priority | Count | FRs |
 |----------|-------|-----|
@@ -1351,7 +1585,7 @@ Nice-to-have features that can be added in later phases. Not critical for initia
 
 ---
 
-## Appendix C: MoSCoW Summary
+## Appendix C (Legacy): v1.0 MoSCoW Summary
 
 ```
 Must Have (20 FRs)  ████████████████████████████████████  50%

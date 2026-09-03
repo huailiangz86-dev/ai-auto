@@ -1,0 +1,29 @@
+$brand: #07c160;
+$text-main: #333333;
+$text-secondary: #666666;
+$text-muted: #999999;
+$line: #e5e5e5;
+$surface: #ffffff;
+$page: #f7f7f7;
+
+page {
+  min-height: 100%;
+  background: $page;
+  color: $text-main;
+  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+}
+
+.safe-bottom {
+  padding-bottom: calc(32rpx + env(safe-area-inset-bottom));
+}
+
+.page-padding {
+  padding: 24rpx;
+}
+
+.empty-state {
+  padding: 128rpx 48rpx;
+  color: $text-muted;
+  text-align: center;
+  font-size: 28rpx;
+}

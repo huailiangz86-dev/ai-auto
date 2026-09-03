@@ -4,10 +4,10 @@
   "private": true,
   "description": "AI auto - Core API service (NestJS)",
   "scripts": {
-    "dev": "nest start --watch",
+    "dev": "node --watch -r ts-node/register -r tsconfig-paths/register src/main.ts",
     "build": "nest build",
-    "start": "node dist/main",
-    "start:prod": "node dist/main",
+    "start": "node -r ts-node/register -r tsconfig-paths/register dist/apps/api/src/main",
+    "start:prod": "node -r ts-node/register -r tsconfig-paths/register dist/apps/api/src/main",
     "lint": "eslint \"{src,test}/**/*.ts\" --fix",
     "lint:check": "eslint \"{src,test}/**/*.ts\"",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
@@ -19,22 +19,24 @@
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "type-check": "tsc --noEmit",
     "clean": "rm -rf dist",
-    "typeorm": "typeorm-ts-node-commonjs"
+    "typeorm": "typeorm-ts-node-commonjs",
+    "migration:run": "typeorm-ts-node-commonjs migration:run -d src/data-source.ts",
+    "migration:revert": "typeorm-ts-node-commonjs migration:revert -d src/data-source.ts"
   },
   "dependencies": {
+    "@ai-auto/shared": "workspace:*",
+    "@nestjs/axios": "^3.1.3",
     "@nestjs/common": "^10.4.15",
     "@nestjs/config": "^3.3.0",
     "@nestjs/core": "^10.4.15",
     "@nestjs/jwt": "^10.2.0",
     "@nestjs/passport": "^10.0.3",
     "@nestjs/platform-express": "^10.4.15",
-    "@nestjs/swagger": "^8.0.0",
-    "@nestjs/typeorm": "^10.0.2",
-    "@nestjs/axios": "^3.1.3",
-    "@nestjs/throttler": "^6.4.1",
     "@nestjs/schedule": "^4.1.2",
-    "@ai-auto/shared": "workspace:*",
-    "bcrypt": "^5.1.1",
+    "@nestjs/swagger": "^8.0.0",
+    "@nestjs/throttler": "^6.4.1",
+    "@nestjs/typeorm": "^10.0.2",
+    "bcrypt": "^6.0.0",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.1",
     "helmet": "^8.0.0",
@@ -44,6 +46,7 @@
     "passport-jwt": "^4.0.1",
     "passport-local": "^1.0.0",
     "pg": "^8.13.0",
+    "prom-client": "^15.1.3",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
     "typeorm": "^0.3.20",
@@ -93,7 +96,7 @@
     "coverageDirectory": "../coverage",
     "testEnvironment": "node",
     "moduleNameMapper": {
-      "^@ai-auto/shared(|/.*)$": "/Users/zhang/Documents/AI auto/packages/shared/src/$1"
+      "^@ai-auto/shared(|/.*)$": "<rootDir>/../../../packages/shared/src/$1"
     }
   }
 }

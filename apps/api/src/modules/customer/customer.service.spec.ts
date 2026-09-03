@@ -12,9 +12,14 @@ import { CustomerService } from './customer.service'
 import { Customer } from './entities/customer.entity'
 import { CustomerAttribution } from './entities/customer-attribution.entity'
 import { CustomerCoupon } from './entities/customer-coupon.entity'
+import { MerchantCustomerLock } from './entities/merchant-customer-lock.entity'
+import { CustomerDataExportRequest } from './entities/customer-data-export-request.entity'
 import { Coupon } from '../campaign/entities/coupon.entity'
+import { Redemption } from '../commission/entities/redemption.entity'
 import { SharingAgent } from '../agent/entities/sharing-agent.entity'
+import { Store } from '../merchant/entities/store.entity'
 import { CouponStatus } from '@ai-auto/shared'
+import { SharingTaskService } from '../task/sharing-task.service'
 
 function createMockRepo() {
   return {
@@ -34,8 +39,12 @@ describe('CustomerService', () => {
   let attributionRepo: any
   let couponRepo: any
   let customerCouponRepo: any
+  let merchantCustomerLockRepo: any
+  let dataExportRequestRepo: any
+  let redemptionRepo: any
   let dataSource: any
   let agentRepo: any
+  let storeRepo: any
 
   beforeEach(async () => {
     customerRepo = createMockRepo()
@@ -50,9 +59,27 @@ describe('CustomerService', () => {
       })),
     }
     customerCouponRepo = createMockRepo()
+    merchantCustomerLockRepo = createMockRepo()
+    merchantCustomerLockRepo.create.mockImplementation((value: any) => value)
+    merchantCustomerLockRepo.save.mockImplementation(async (value: any) => value)
+    dataExportRequestRepo = createMockRepo()
+    redemptionRepo = createMockRepo()
     agentRepo = {
       ...createMockRepo(),
       findOne: jest.fn().mockResolvedValue({ id: 'agent-123', nickname: '小美' }),
+    }
+    storeRepo = {
+      ...createMockRepo(),
+      createQueryBuilder: jest.fn(() => ({
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        take: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue([]),
+        getManyAndCount: jest.fn().mockResolvedValue([[], 0]),
+      })),
     }
 
     dataSource = {
@@ -70,9 +97,17 @@ describe('CustomerService', () => {
         { provide: getRepositoryToken(Customer), useValue: customerRepo },
         { provide: getRepositoryToken(CustomerAttribution), useValue: attributionRepo },
         { provide: getRepositoryToken(CustomerCoupon), useValue: customerCouponRepo },
+        { provide: getRepositoryToken(MerchantCustomerLock), useValue: merchantCustomerLockRepo },
+        { provide: getRepositoryToken(CustomerDataExportRequest), useValue: dataExportRequestRepo },
         { provide: getRepositoryToken(Coupon), useValue: couponRepo },
+        { provide: getRepositoryToken(Redemption), useValue: redemptionRepo },
         { provide: getRepositoryToken(SharingAgent), useValue: agentRepo },
+        { provide: getRepositoryToken(Store), useValue: storeRepo },
         { provide: DataSource, useValue: dataSource },
+        {
+          provide: SharingTaskService,
+          useValue: { trackClaim: jest.fn().mockResolvedValue(undefined) },
+        },
       ],
     }).compile()
 
@@ -447,6 +482,46 @@ describe('CustomerService', () => {
       const result = await service.listCustomerCoupons('customer-123', {})
 
       expect(result.items).toHaveLength(0)
+    })
+  })
+
+  // ========================
+  // Personal data export (STORY-AI-040)
+  // ========================
+
+  describe('personal data export', () => {
+    it('creates an auditable request and scopes the download to its owner', async () => {
+      customerRepo.findOne.mockResolvedValueOnce({ id: 'customer-123' })
+      dataExportRequestRepo.create.mockReturnValueOnce({
+        id: 'request-123',
+        customerId: 'customer-123',
+        status: 'completed',
+      })
+      dataExportRequestRepo.save.mockResolvedValueOnce({
+        id: 'request-123',
+        customerId: 'customer-123',
+        status: 'completed',
+        completedAt: new Date(),
+      })
+
+      const result = await service.requestPersonalDataExport('customer-123')
+
+      expect(result.requestId).toBe('request-123')
+      expect(result.downloadPath).toContain('request-123')
+      expect(dataExportRequestRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ customerId: 'customer-123', format: 'json' }),
+      )
+    })
+
+    it('does not return another customer’s export request', async () => {
+      dataExportRequestRepo.findOne.mockResolvedValueOnce(null)
+
+      await expect(
+        service.downloadPersonalDataExport('customer-123', 'another-customers-request'),
+      ).rejects.toThrow(NotFoundException)
+      expect(dataExportRequestRepo.findOne).toHaveBeenCalledWith({
+        where: { id: 'another-customers-request', customerId: 'customer-123' },
+      })
     })
   })
 })

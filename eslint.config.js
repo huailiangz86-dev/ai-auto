@@ -81,4 +81,17 @@ export default [
       ...prettierConfig.rules,
     },
   },
+
+  // Node.js smoke-test scripts
+  {
+    files: ['apps/api/scripts/**/*.js'],
+    languageOptions: {
+      globals: {
+        process: 'readonly',
+        console: 'readonly',
+        require: 'readonly',
+        fetch: 'readonly',
+      },
+    },
+  },
 ]

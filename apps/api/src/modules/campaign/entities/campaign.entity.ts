@@ -11,8 +11,8 @@ import { Store } from '../../merchant/entities/store.entity'
 
 @Entity('campaigns')
 @Index('idx_campaign_merchant', ['merchantId'])
-@Index('idx_campaign_status', ['status'])
-@Index('idx_campaign_active', ['status', 'startAt', 'endAt'])
+@Index('idx_campaign_status', ['campaignStatus'])
+@Index('idx_campaign_active', ['campaignStatus', 'startAt', 'endAt'])
 @Index('idx_campaign_start_expire', ['startAt', 'endAt'])
 export class Campaign extends BaseEntity {
   @Column({ name: 'merchant_id', type: 'uuid' })

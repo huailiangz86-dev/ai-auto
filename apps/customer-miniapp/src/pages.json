@@ -1,0 +1,61 @@
+{
+  "pages": [
+    {
+      "path": "pages/home/index",
+      "style": { "navigationBarTitleText": "附近优惠", "enablePullDownRefresh": true, "onReachBottomDistance": 50 }
+    },
+    {
+      "path": "pages/coupon-detail/index",
+      "style": { "navigationBarTitleText": "优惠详情" }
+    },
+    {
+      "path": "pages/redemption/index",
+      "style": { "navigationBarTitleText": "出示优惠券" }
+    },
+    {
+      "path": "pages/login/index",
+      "style": { "navigationBarTitleText": "登录 AI auto", "navigationBarBackgroundColor": "#ffffff" }
+    },
+    {
+      "path": "pages/profile/index",
+      "style": { "navigationBarTitleText": "我的" }
+    },
+    {
+      "path": "pages/ai-creation/index",
+      "style": { "navigationBarTitleText": "AI 创作赚佣金" }
+    },
+    {
+      "path": "pages/ai-creation/copywriting",
+      "style": { "navigationBarTitleText": "AI 推广文案", "enableShareAppMessage": true }
+    },
+    {
+      "path": "pages/ai-creation/video",
+      "style": { "navigationBarTitleText": "AI 短视频", "enableShareAppMessage": true }
+    },
+    {
+      "path": "pages/ai-creation/poster",
+      "style": { "navigationBarTitleText": "AI 推广海报", "enableShareAppMessage": true }
+    },
+    {
+      "path": "pages/gamification/index",
+      "style": { "navigationBarTitleText": "分享挑战" }
+    }
+  ],
+  "tabBar": {
+    "color": "#999999",
+    "selectedColor": "#07c160",
+    "backgroundColor": "#ffffff",
+    "borderStyle": "black",
+    "list": [
+      { "pagePath": "pages/home/index", "text": "首页" },
+      { "pagePath": "pages/coupons/index", "text": "券包" },
+      { "pagePath": "pages/wallet/index", "text": "钱包" },
+      { "pagePath": "pages/profile/index", "text": "我的" }
+    ]
+  },
+  "globalStyle": {
+    "navigationBarTextStyle": "black",
+    "navigationBarBackgroundColor": "#ffffff",
+    "backgroundColor": "#f7f7f7"
+  }
+}

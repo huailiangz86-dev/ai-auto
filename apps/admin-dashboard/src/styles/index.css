@@ -1,0 +1,35 @@
+:root { font-family: Inter, "PingFang SC", "Microsoft YaHei", sans-serif; color: #1a202c; background: #edf2f7; font-synthesis: none; }
+* { box-sizing: border-box; }
+body { min-width: 320px; margin: 0; background: #edf2f7; }
+.login-page { align-items: center; background: linear-gradient(135deg, #1a365d 0%, #2c5282 55%, #4299e1 100%); display: flex; justify-content: center; min-height: 100vh; padding: 24px; }
+.login-card { box-shadow: 0 20px 60px rgba(0, 0, 0, .22); max-width: 420px; padding: 22px; width: 100%; }.login-brand { align-items: center; color: #1a365d; display: flex; font-size: 18px; font-weight: 700; gap: 10px; margin-bottom: 32px; }.login-error { margin-bottom: 20px; }
+.app-shell { min-height: 100vh; }
+.app-sider { background: #1a202c !important; position: sticky !important; top: 0; height: 100vh; }
+.brand { height: 64px; display: flex; align-items: center; gap: 10px; padding: 0 24px; color: white; font-size: 18px; font-weight: 700; white-space: nowrap; overflow: hidden; }
+.brand-mark { align-items: center; background: #4299e1; border-radius: 8px; display: inline-flex; height: 28px; justify-content: center; width: 28px; }
+.sider-caption { color: #a0aec0; font-size: 12px; letter-spacing: .1em; padding: 16px 24px 8px; text-transform: uppercase; }
+.app-sider .ant-menu { background: #1a202c; border-inline-end: 0; }
+.app-sider .ant-menu-item { margin-inline: 8px; width: calc(100% - 16px); }
+.app-header { align-items: center; background: #fff; border-bottom: 1px solid #e2e8f0; display: flex; height: 64px; justify-content: space-between; padding: 0 28px; }
+.header-bell { font-size: 19px; }
+.dashboard-content { margin: 0 auto; max-width: 1680px; padding: 28px; width: 100%; }
+.page-heading { align-items: center; display: flex; justify-content: space-between; margin-bottom: 20px; }
+.page-heading .ant-typography { margin-bottom: 4px; }
+.filter-card { margin-bottom: 20px; }
+.filter-label { color: #4a5568; font-weight: 600; }
+.scope-input { width: 220px; }
+.kpi-card { background: #fff; border-radius: 8px; box-shadow: 0 1px 3px rgba(26,32,44,.09); display: flex; flex-direction: column; min-height: 148px; padding: 24px; }
+.kpi-label { color: #4a5568; font-size: 14px; }
+.kpi-card strong { color: #1a202c; font-size: 32px; letter-spacing: -.03em; line-height: 1.5; }
+.kpi-change { font-size: 13px; }
+.positive { color: #276749; }.negative { color: #c53030; }
+.section-block { margin-top: 24px; }
+.section-heading { align-items: baseline; display: flex; justify-content: space-between; margin-bottom: 12px; }
+.section-heading h2 { font-size: 18px; margin: 0; }.section-heading span { color: #718096; font-size: 13px; }
+.trends-grid { display: grid; gap: 16px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.trend-card { background: #fff; border-radius: 8px; box-shadow: 0 1px 3px rgba(26,32,44,.09); min-width: 0; padding: 18px 18px 12px; }
+.trend-heading { align-items: baseline; display: flex; justify-content: space-between; }.trend-heading h3 { font-size: 15px; margin: 0; }.trend-heading span { color: #718096; font-size: 12px; }
+.trend-svg { display: block; height: 150px; overflow: visible; width: 100%; }.grid-line { stroke: #edf2f7; stroke-width: 1; }.chart-labels { color: #a0aec0; display: flex; font-size: 11px; justify-content: space-between; }
+.alert-summary .ant-tag { margin-inline-end: 4px; }.system-alert { margin-top: 16px; }
+.pending-card { height: 100%; }.pending-row { align-items: center; border-bottom: 1px solid #edf2f7; display: flex; gap: 12px; min-height: 69px; }.pending-row:last-child { border-bottom: 0; }.pending-icon { font-size: 20px; }.pending-row div { display: flex; flex: 1; flex-direction: column; }.pending-row strong { font-size: 16px; }.pending-row span { color: #718096; font-size: 12px; }
+@media (max-width: 760px) { .app-sider { display: none; }.dashboard-content { padding: 18px; }.app-header { padding: 0 18px; }.page-heading { align-items: flex-start; gap: 12px; flex-direction: column; }.scope-input { width: min(100%, 260px); }.trends-grid { grid-template-columns: 1fr; }.section-heading { align-items: flex-start; gap: 4px; flex-direction: column; } }

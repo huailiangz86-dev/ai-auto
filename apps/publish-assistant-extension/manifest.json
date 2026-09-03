@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "AI auto 发布助手（测试）",
+  "description": "将 AI auto 已确认文案送到平台发布页；不自动点击发布。",
+  "version": "0.1.0",
+  "permissions": ["storage", "tabs"],
+  "host_permissions": ["http://localhost:3102/*", "https://ai-auto.example.com/*", "https://*.ai-auto.example.com/*", "https://creator.douyin.com/*", "https://www.xiaohongshu.com/*", "https://channels.weixin.qq.com/*", "https://cp.kuaishou.cn/*"],
+  "background": { "service_worker": "background.js", "type": "module" },
+  "content_scripts": [
+    { "matches": ["http://localhost:3102/*", "https://ai-auto.example.com/*", "https://*.ai-auto.example.com/*"], "js": ["dashboard-bridge.js"], "run_at": "document_start" },
+    { "matches": ["https://creator.douyin.com/*", "https://www.xiaohongshu.com/*", "https://channels.weixin.qq.com/*", "https://cp.kuaishou.cn/*"], "js": ["publisher-panel.js"], "run_at": "document_idle" }
+  ]
+}

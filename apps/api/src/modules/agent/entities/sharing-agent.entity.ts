@@ -13,6 +13,8 @@ import { AgentLevel, AuditStatus } from '@ai-auto/shared'
 @Index('idx_agent_status', ['status'])
 @Index('idx_agent_level', ['level'])
 @Index('idx_agent_valid_customers', ['validCustomerCount'])
+@Index('idx_agent_creator_governance', ['status', 'blacklistedAt', 'creatorGrowthLevel'])
+@Index('idx_agent_type', ['agentType'])
 export class SharingAgent extends BaseEntity {
   // ---- Basic Info ----
   @Column({ type: 'varchar', length: 20 })
@@ -55,6 +57,48 @@ export class SharingAgent extends BaseEntity {
   @Column({ name: 'audit_comment', type: 'text', nullable: true })
   auditComment?: string | null
 
+  @Column({ name: 'agent_type', type: 'varchar', length: 32, default: 'ordinary_user' })
+  agentType!: 'professional_creator' | 'ordinary_user'
+
+  // ---- v2 Creator Profile / Governance ----
+  @Column({ name: 'region', type: 'varchar', length: 100, nullable: true })
+  region?: string | null
+
+  @Column({ name: 'creator_categories', type: 'jsonb', default: () => "'[]'::jsonb" })
+  creatorCategories!: string[]
+
+  @Column({ name: 'task_preferences', type: 'jsonb', default: () => "'{}'::jsonb" })
+  taskPreferences!: Record<string, unknown>
+
+  @Column({ name: 'creator_growth_score', type: 'int', default: 0 })
+  creatorGrowthScore!: number
+
+  @Column({ name: 'creator_growth_level', type: 'smallint', default: 1 })
+  creatorGrowthLevel!: number
+
+  @Column({ name: 'creator_score_breakdown', type: 'jsonb', default: () => "'{}'::jsonb" })
+  creatorScoreBreakdown!: Record<string, number>
+
+  @Column({ name: 'creator_score_updated_at', type: 'timestamptz', nullable: true })
+  creatorScoreUpdatedAt?: Date | null
+
+  @Column({ name: 'blacklisted_at', type: 'timestamptz', nullable: true })
+  blacklistedAt?: Date | null
+
+  @Column({ name: 'blacklist_reason', type: 'text', nullable: true })
+  blacklistReason?: string | null
+
+  @Column({ name: 'frozen_at', type: 'timestamptz', nullable: true })
+  frozenAt?: Date | null
+
+  @Column({ name: 'frozen_reason', type: 'text', nullable: true })
+  frozenReason?: string | null
+
+  @Column({ name: 'creator_task_limit', type: 'int', nullable: true })
+  creatorTaskLimit?: number | null
+
+  @Column({ name: 'operation_tags', type: 'jsonb', default: () => "'[]'::jsonb" })
+  operationTags!: string[]
   // ---- Reputation / Level System ----
   @Column({
     type: 'enum',

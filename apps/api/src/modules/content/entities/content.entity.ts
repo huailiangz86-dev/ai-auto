@@ -14,6 +14,7 @@ import { Campaign } from '../../campaign/entities/campaign.entity'
 @Index('idx_content_campaign', ['campaignId'])
 @Index('idx_content_status', ['status'])
 @Index('idx_content_type', ['contentType'])
+@Index('idx_content_creator_task', ['creatorTaskId'])
 export class Content extends BaseEntity {
   // ---- Links ----
   @Column({ name: 'agent_id', type: 'uuid' })
@@ -24,6 +25,11 @@ export class Content extends BaseEntity {
 
   @Column({ name: 'coupon_id', type: 'uuid', nullable: true })
   couponId?: string | null
+
+  // Merchant-funded Creator Studio output is linked to the assignment that
+  // funded it, so task review and the financial evidence chain stay joined.
+  @Column({ name: 'creator_task_id', type: 'uuid', nullable: true })
+  creatorTaskId?: string | null
 
   // ---- Content Type ----
   // 'copywriting' | 'video' | 'poster'

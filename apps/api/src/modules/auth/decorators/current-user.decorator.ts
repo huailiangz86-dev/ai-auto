@@ -8,6 +8,8 @@ import { UserRole } from '@ai-auto/shared'
 export interface CurrentUserPayload {
   id: string
   role: UserRole
+  merchantId?: string
+  agentId?: string
   phone?: string
   username?: string
 }
