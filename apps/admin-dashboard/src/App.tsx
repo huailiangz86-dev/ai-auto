@@ -4,7 +4,9 @@ import {
   BarChartOutlined,
   BellOutlined,
   CheckCircleOutlined,
+  DollarOutlined,
   FileTextOutlined,
+  FileSearchOutlined,
   LogoutOutlined,
   MenuFoldOutlined,
   ReloadOutlined,
@@ -20,6 +22,7 @@ import {
   Button,
   Card,
   Col,
+  Descriptions,
   Empty,
   Input,
   Layout,
@@ -35,12 +38,11 @@ import {
   Tabs,
   Table,
   Tag,
-  Tooltip,
   Typography,
   message,
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 
 import { clearAdminSession, hasAdminSession } from './api/auth'
 import {
@@ -53,6 +55,8 @@ import {
 import { KpiCard } from './components/KpiCard'
 import { LoginPage } from './components/LoginPage'
 import { LifecycleManagement } from './LifecycleManagement'
+import { RiskRuleConfiguration } from './RiskRuleConfiguration'
+import { RelationshipManagement } from './RelationshipManagement'
 import { TrendChart } from './components/TrendChart'
 import {
   approveAgent,
@@ -71,16 +75,20 @@ import {
   type FraudAlert,
   type ModerationContent,
   type OperationAuditLog,
-  type PendingAgent,
-  type PendingMerchant,
   type Reconciliation,
   getCreatorTaskReviewQueue,
   getCreatorTaskRiskQueue,
   getCreatorTaskWorkbench,
+  getCampaignEconomics,
+  getCreatorTaskAppeals,
   reviewCreatorTask,
+  resolveCreatorTaskAppeal,
   resolveCreatorTaskRisk,
   type CreatorTaskQueueItem,
   type CreatorTaskWorkbench,
+  type CampaignEconomics,
+  type CreatorTaskAppeal,
+  type FinancialLedgerEntry,
   getPilotOperationsMetrics,
   getPilotWeeklyEvidence,
   type PilotOperationsMetrics,
@@ -91,7 +99,7 @@ const { Header, Sider, Content } = Layout
 
 const pendingMeta: Record<
   PendingAction['type'],
-  { label: string; icon: React.ReactNode; color: string }
+  { label: string; icon: ReactNode; color: string }
 > = {
   fraud_alert: { label: '风控告警待处理', icon: <SafetyCertificateOutlined />, color: '#c53030' },
   merchant_audit: { label: '商户资质待审核', icon: <ShopOutlined />, color: '#b7791f' },
@@ -155,11 +163,14 @@ function DashboardApp({ onLogout }: { onLogout: () => void }) {
             { key: 'dashboard', icon: <BarChartOutlined />, label: '运营大屏' },
             { key: 'merchants', icon: <ShopOutlined />, label: '商户' },
             { key: 'agents', icon: <TeamOutlined />, label: '分享员管理' },
+            { key: 'relationships', icon: <TeamOutlined />, label: '合作关系' },
             { key: 'creator-review', icon: <AuditOutlined />, label: '创作者任务审核' },
             { key: 'risk-holds', icon: <SafetyCertificateOutlined />, label: '任务风控暂停' },
             { key: 'finance', icon: <WalletOutlined />, label: '财务对账' },
+            { key: 'economics', icon: <DollarOutlined />, label: '经营经济性' },
             { key: 'fraud', icon: <SafetyCertificateOutlined />, label: '风控中心' },
             { key: 'content', icon: <AuditOutlined />, label: '内容审核' },
+            { key: 'appeals', icon: <FileSearchOutlined />, label: '申诉处理' },
             { key: 'pilot-evidence', icon: <BarChartOutlined />, label: '试点证据看板' },
             { key: 'audit', icon: <FileTextOutlined />, label: '操作审计' },
           ]}
@@ -499,21 +510,27 @@ const pendingRoute: Record<PendingAction['type'], string> = {
 type OperationKey =
   | 'merchants'
   | 'agents'
+  | 'relationships'
   | 'creator-review'
   | 'risk-holds'
   | 'finance'
+  | 'economics'
   | 'fraud'
   | 'content'
+  | 'appeals'
   | 'pilot-evidence'
   | 'audit'
 const operationTitles: Record<OperationKey, string> = {
   merchants: '商户',
   agents: '分享员管理',
+  relationships: '合作关系',
   'creator-review': '创作者任务审核',
   'risk-holds': '任务风控暂停',
   finance: '财务对账',
+  economics: '经营经济性',
   fraud: '风控中心',
   content: '内容审核',
+  appeals: '申诉处理',
   'pilot-evidence': '试点证据看板',
   audit: '操作审计',
 }
@@ -521,6 +538,14 @@ const operationTitles: Record<OperationKey, string> = {
 function OperationsPage({ activeKey }: { activeKey: string }) {
   const key = activeKey as OperationKey
   const [reasonModal, contextHolder] = Modal.useModal()
+  const [economicsCampaignId, setEconomicsCampaignId] = useState('')
+  const [economicsMerchantId, setEconomicsMerchantId] = useState('')
+  const [appealsStatus, setAppealsStatus] = useState<CreatorTaskAppeal['status'] | 'all'>('open')
+  const [appealsTarget, setAppealsTarget] = useState<CreatorTaskAppeal['target'] | ''>('')
+  const [appealsMerchantId, setAppealsMerchantId] = useState('')
+  const [appealsCreatorId, setAppealsCreatorId] = useState('')
+  const [appealsTaskId, setAppealsTaskId] = useState('')
+  const [appealsPage, setAppealsPage] = useState(1)
   const merchants = useQuery({
     queryKey: ['pending-merchants'],
     queryFn: getPendingMerchants,
@@ -541,10 +566,41 @@ function OperationsPage({ activeKey }: { activeKey: string }) {
     queryFn: getReconciliations,
     enabled: key === 'finance',
   })
+  const economics = useQuery({
+    queryKey: ['campaign-economics', economicsCampaignId, economicsMerchantId],
+    queryFn: () =>
+      getCampaignEconomics({
+        campaignId: economicsCampaignId || undefined,
+        merchantId: economicsMerchantId || undefined,
+      }),
+    enabled: key === 'economics',
+  })
   const contents = useQuery({
     queryKey: ['moderation-contents'],
     queryFn: getModerationContents,
     enabled: key === 'content',
+  })
+  const appeals = useQuery({
+    queryKey: [
+      'creator-task-appeals',
+      appealsStatus,
+      appealsTarget,
+      appealsMerchantId,
+      appealsCreatorId,
+      appealsTaskId,
+      appealsPage,
+    ],
+    queryFn: () =>
+      getCreatorTaskAppeals({
+        status: appealsStatus,
+        target: appealsTarget || undefined,
+        merchantId: appealsMerchantId || undefined,
+        creatorId: appealsCreatorId || undefined,
+        creatorTaskId: appealsTaskId || undefined,
+        page: appealsPage,
+        pageSize: 20,
+      }),
+    enabled: key === 'appeals',
   })
   const auditLogs = useQuery({
     queryKey: ['operation-audit-logs'],
@@ -560,13 +616,15 @@ function OperationsPage({ activeKey }: { activeKey: string }) {
     enabled: key === 'pilot-evidence',
   })
   const refresh = () => {
-    void merchants.refetch()
-    void agents.refetch()
-    void fraud.refetch()
-    void finance.refetch()
-    void contents.refetch()
-    void auditLogs.refetch()
-    void pilot.refetch()
+    if (key === 'merchants') void merchants.refetch()
+    if (key === 'agents') void agents.refetch()
+    if (key === 'fraud') void fraud.refetch()
+    if (key === 'finance') void finance.refetch()
+    if (key === 'economics') void economics.refetch()
+    if (key === 'content') void contents.refetch()
+    if (key === 'appeals') void appeals.refetch()
+    if (key === 'audit') void auditLogs.refetch()
+    if (key === 'pilot-evidence') void pilot.refetch()
   }
   const run = async (action: () => Promise<unknown>) => {
     try {
@@ -589,22 +647,36 @@ function OperationsPage({ activeKey }: { activeKey: string }) {
         await run(() => onOk(value))
       },
     })
-  const loading =
-    merchants.isLoading ||
-    agents.isLoading ||
-    fraud.isLoading ||
-    finance.isLoading ||
-    contents.isLoading ||
-    auditLogs.isLoading ||
-    pilot.isLoading
-  const error =
-    merchants.error ||
-    agents.error ||
-    fraud.error ||
-    finance.error ||
-    contents.error ||
-    auditLogs.error ||
-    pilot.error
+  const loadingByKey: Record<OperationKey, boolean> = {
+    merchants: merchants.isLoading,
+    agents: agents.isLoading,
+    relationships: false,
+    'creator-review': false,
+    'risk-holds': false,
+    finance: finance.isLoading,
+    economics: economics.isLoading,
+    fraud: fraud.isLoading,
+    content: contents.isLoading,
+    appeals: appeals.isLoading,
+    'pilot-evidence': pilot.isLoading,
+    audit: auditLogs.isLoading,
+  }
+  const errorByKey: Record<OperationKey, Error | null> = {
+    merchants: merchants.error,
+    agents: agents.error,
+    relationships: null,
+    'creator-review': null,
+    'risk-holds': null,
+    finance: finance.error,
+    economics: economics.error,
+    fraud: fraud.error,
+    content: contents.error,
+    appeals: appeals.error,
+    'pilot-evidence': pilot.error,
+    audit: auditLogs.error,
+  }
+  const loading = loadingByKey[key]
+  const error = errorByKey[key]
   return (
     <>
       {contextHolder}
@@ -701,16 +773,29 @@ function OperationsPage({ activeKey }: { activeKey: string }) {
           ]}
         />
       ) : null}
+      {!error && key === 'relationships' ? <RelationshipManagement /> : null}
       {!error && key === 'fraud' ? (
-        <FraudTable
-          rows={fraud.data?.items ?? []}
-          onResolve={(id, action) =>
-            action === 'review'
-              ? run(() => resolveFraudAlert(id, action))
-              : askReason(action === 'dismiss' ? '标记风控告警为误报' : '冻结待结算佣金', (note) =>
-                  resolveFraudAlert(id, action, note),
-                )
-          }
+        <Tabs
+          items={[
+            {
+              key: 'alerts',
+              label: `风控告警（${fraud.data?.summary.total ?? fraud.data?.items.length ?? 0}）`,
+              children: (
+                <FraudTable
+                  rows={fraud.data?.items ?? []}
+                  onResolve={(id, action) =>
+                    action === 'review'
+                      ? run(() => resolveFraudAlert(id, action))
+                      : askReason(
+                          action === 'dismiss' ? '标记风控告警为误报' : '冻结待结算佣金',
+                          (note) => resolveFraudAlert(id, action, note),
+                        )
+                  }
+                />
+              ),
+            },
+            { key: 'rules', label: '规则配置', children: <RiskRuleConfiguration /> },
+          ]}
         />
       ) : null}
       {!error && key === 'finance' ? (
@@ -718,6 +803,17 @@ function OperationsPage({ activeKey }: { activeKey: string }) {
           rows={finance.data?.items ?? []}
           pendingAmount={finance.data?.summary.pendingAmount ?? 0}
           onSettle={(id) => run(() => settleReconciliation(id))}
+        />
+      ) : null}
+      {!error && key === 'economics' ? (
+        <CampaignEconomicsDashboard
+          data={economics.data}
+          campaignId={economicsCampaignId}
+          merchantId={economicsMerchantId}
+          onCampaignIdChange={(value) => setEconomicsCampaignId(value)}
+          onMerchantIdChange={(value) => setEconomicsMerchantId(value)}
+          onRefresh={() => void economics.refetch()}
+          loading={economics.isFetching}
         />
       ) : null}
       {!error && key === 'content' ? (
@@ -732,12 +828,498 @@ function OperationsPage({ activeKey }: { activeKey: string }) {
           }
         />
       ) : null}
+      {!error && key === 'appeals' ? (
+        <AppealsDashboard
+          data={appeals.data}
+          status={appealsStatus}
+          target={appealsTarget}
+          merchantId={appealsMerchantId}
+          creatorId={appealsCreatorId}
+          taskId={appealsTaskId}
+          page={appealsPage}
+          loading={appeals.isFetching}
+          onStatusChange={(value) => {
+            setAppealsStatus(value)
+            setAppealsPage(1)
+          }}
+          onTargetChange={(value) => {
+            setAppealsTarget(value)
+            setAppealsPage(1)
+          }}
+          onMerchantIdChange={(value) => {
+            setAppealsMerchantId(value)
+            setAppealsPage(1)
+          }}
+          onCreatorIdChange={(value) => {
+            setAppealsCreatorId(value)
+            setAppealsPage(1)
+          }}
+          onTaskIdChange={(value) => {
+            setAppealsTaskId(value)
+            setAppealsPage(1)
+          }}
+          onPageChange={setAppealsPage}
+          onRefresh={() => void appeals.refetch()}
+          onResolve={(id, decision, resolution) =>
+            run(() => resolveCreatorTaskAppeal(id, decision, resolution))
+          }
+        />
+      ) : null}
       {!error && key === 'pilot-evidence' && pilot.data ? (
         <PilotEvidenceDashboard data={pilot.data} />
       ) : null}
       {!error && key === 'audit' ? (
         <OperationAuditTable rows={auditLogs.data?.items ?? []} />
       ) : null}
+    </>
+  )
+}
+
+function CampaignEconomicsDashboard({
+  data,
+  campaignId,
+  merchantId,
+  onCampaignIdChange,
+  onMerchantIdChange,
+  onRefresh,
+  loading,
+}: {
+  data?: CampaignEconomics
+  campaignId: string
+  merchantId: string
+  onCampaignIdChange: (value: string) => void
+  onMerchantIdChange: (value: string) => void
+  onRefresh: () => void
+  loading: boolean
+}) {
+  const totals = data?.totals
+  const scope = data?.scope.campaignId
+    ? `Campaign ${data.scope.campaignId}`
+    : data?.scope.merchantId
+      ? `商户 ${data.scope.merchantId}`
+      : '平台全部账本'
+  const columns: ColumnsType<FinancialLedgerEntry> = [
+    { title: '发生时间', dataIndex: 'occurredAt', render: formatDate },
+    { title: '分类', dataIndex: 'classification', render: formatFinancialClassification },
+    { title: '类型', dataIndex: 'entryType' },
+    {
+      title: '金额',
+      dataIndex: 'amount',
+      render: (value: number, row) => (
+        <Typography.Text type={row.classification === 'revenue' ? 'success' : undefined}>
+          {formatCurrency(value, 2)}
+        </Typography.Text>
+      ),
+    },
+    { title: 'Campaign', dataIndex: 'campaignId', render: shortId },
+    { title: 'Creator Task', dataIndex: 'creatorTaskId', render: shortId },
+    { title: '来源', dataIndex: 'sourceReference', render: emptyText },
+    { title: '说明', dataIndex: 'description', render: emptyText },
+  ]
+  return (
+    <>
+      <Card className="filter-card" size="small">
+        <Space wrap>
+          <Input
+            allowClear
+            value={campaignId}
+            onChange={(event) => onCampaignIdChange(event.target.value)}
+            placeholder="Campaign ID（可选）"
+            aria-label="Campaign ID"
+            className="scope-input"
+          />
+          <Input
+            allowClear
+            value={merchantId}
+            onChange={(event) => onMerchantIdChange(event.target.value)}
+            placeholder="商户 ID（可选）"
+            aria-label="商户 ID"
+            className="scope-input"
+          />
+          <Button icon={<ReloadOutlined spin={loading} />} onClick={onRefresh} loading={loading}>
+            刷新经济性
+          </Button>
+        </Space>
+      </Card>
+      {!data ? (
+        <Card>
+          <Skeleton active paragraph={{ rows: 10 }} />
+        </Card>
+      ) : (
+        <>
+          <Alert
+            showIcon
+            type={(totals?.grossProfit ?? 0) >= 0 ? 'success' : 'warning'}
+            className="operation-summary"
+            message={`当前范围：${scope}；毛利率 ${formatPercent(totals?.grossMargin)}`}
+          />
+          <Card size="small" className="economics-note">
+            <Space wrap>
+              <Typography.Text>已纳入 {data.summary.entryCount} 笔可追溯流水</Typography.Text>
+              <Typography.Text>总成本 {formatCurrency(data.summary.totalCost, 2)}</Typography.Text>
+              <Typography.Text type={(data.summary.netResult ?? 0) >= 0 ? 'success' : 'danger'}>
+                净经营结果 {formatCurrency(data.summary.netResult, 2)}
+              </Typography.Text>
+            </Space>
+          </Card>
+          <Card size="small" title="流水构成" className="economics-note">
+            <Space wrap>
+              {Object.entries(data.summary.byEntryType).map(([entryType, amount]) => (
+                <Tag key={entryType}>
+                  {entryType}：{formatCurrency(amount, 2)}
+                </Tag>
+              ))}
+              {!Object.keys(data.summary.byEntryType).length ? (
+                <Typography.Text type="secondary">暂无分类流水</Typography.Text>
+              ) : null}
+            </Space>
+          </Card>
+          <Row gutter={[16, 16]} className="section-block">
+            <Col xs={12} sm={8} xl={4}>
+              <Statistic
+                title="收入（平台/商户增长）"
+                value={totals?.merchantGrowthRevenue ?? 0}
+                prefix="¥"
+                precision={2}
+              />
+            </Col>
+            <Col xs={12} sm={8} xl={4}>
+              <Statistic
+                title="Creator Payout COGS"
+                value={totals?.creatorPayoutCogs ?? 0}
+                prefix="¥"
+                precision={2}
+              />
+            </Col>
+            <Col xs={12} sm={8} xl={4}>
+              <Statistic
+                title="运营成本"
+                value={totals?.operatingCost ?? 0}
+                prefix="¥"
+                precision={2}
+              />
+            </Col>
+            <Col xs={12} sm={8} xl={4}>
+              <Statistic
+                title="风险准备金"
+                value={totals?.riskReserve ?? 0}
+                prefix="¥"
+                precision={2}
+              />
+            </Col>
+            <Col xs={12} sm={8} xl={4}>
+              <Statistic
+                title="毛利"
+                value={totals?.grossProfit ?? 0}
+                prefix="¥"
+                precision={2}
+                valueStyle={{ color: (totals?.grossProfit ?? 0) >= 0 ? '#276749' : '#c53030' }}
+              />
+            </Col>
+            <Col xs={12} sm={8} xl={4}>
+              <Statistic
+                title="毛利率"
+                value={(totals?.grossMargin ?? 0) * 100}
+                suffix="%"
+                precision={1}
+              />
+            </Col>
+          </Row>
+          <Card title="账本明细" className="section-block">
+            <Table
+              rowKey="entryId"
+              columns={columns}
+              dataSource={data.entries}
+              pagination={{ pageSize: 20, showSizeChanger: false }}
+              scroll={{ x: 1180 }}
+              locale={{ emptyText: '当前范围没有经济性账本记录' }}
+            />
+          </Card>
+        </>
+      )}
+    </>
+  )
+}
+
+type AppealsResult = Awaited<ReturnType<typeof getCreatorTaskAppeals>>
+
+function AppealsDashboard({
+  data,
+  status,
+  target,
+  merchantId,
+  creatorId,
+  taskId,
+  page,
+  loading,
+  onStatusChange,
+  onTargetChange,
+  onMerchantIdChange,
+  onCreatorIdChange,
+  onTaskIdChange,
+  onPageChange,
+  onRefresh,
+  onResolve,
+}: {
+  data?: AppealsResult
+  status: CreatorTaskAppeal['status'] | 'all'
+  target: CreatorTaskAppeal['target'] | ''
+  merchantId: string
+  creatorId: string
+  taskId: string
+  page: number
+  loading: boolean
+  onStatusChange: (value: CreatorTaskAppeal['status'] | 'all') => void
+  onTargetChange: (value: CreatorTaskAppeal['target'] | '') => void
+  onMerchantIdChange: (value: string) => void
+  onCreatorIdChange: (value: string) => void
+  onTaskIdChange: (value: string) => void
+  onPageChange: (value: number) => void
+  onRefresh: () => void
+  onResolve: (id: string, decision: 'accepted' | 'rejected', resolution: string) => Promise<unknown>
+}) {
+  const [selected, setSelected] = useState<CreatorTaskAppeal | null>(null)
+  const [resolutionTarget, setResolutionTarget] = useState<{
+    appeal: CreatorTaskAppeal
+    decision: 'accepted' | 'rejected'
+  } | null>(null)
+  const [resolutionText, setResolutionText] = useState('')
+  const summary = data?.summary
+  const items = data?.items ?? []
+  const columns: ColumnsType<CreatorTaskAppeal> = [
+    {
+      title: '创作者',
+      key: 'creator',
+      render: (_, row) => (
+        <Space direction="vertical" size={0}>
+          <Typography.Text strong>{row.creator?.nickname || '未命名创作者'}</Typography.Text>
+          <Typography.Text type="secondary">{row.creator?.phone || row.creatorId}</Typography.Text>
+        </Space>
+      ),
+    },
+    {
+      title: '关联任务',
+      key: 'task',
+      render: (_, row) =>
+        row.task ? (
+          <Space direction="vertical" size={0}>
+            <span>
+              {row.task.channel} · {row.task.contentType}
+            </span>
+            <Typography.Text type="secondary">
+              {row.task.status} · {formatCurrency(row.task.baseReward)}
+            </Typography.Text>
+          </Space>
+        ) : (
+          row.creatorTaskId
+        ),
+    },
+    {
+      title: '商户 / Campaign',
+      key: 'scope',
+      render: (_, row) => (
+        <Space direction="vertical" size={0}>
+          <span>{row.task?.merchantId || '—'}</span>
+          <Typography.Text type="secondary">
+            {row.task?.campaignId || '无 Campaign'}
+          </Typography.Text>
+        </Space>
+      ),
+    },
+    { title: '目标', dataIndex: 'target', render: formatAppealTarget },
+    { title: '状态', dataIndex: 'status', render: formatAppealStatus },
+    { title: '申诉原因', dataIndex: 'reason', ellipsis: true },
+    {
+      title: '报酬',
+      key: 'payout',
+      render: (_, row) =>
+        row.payout
+          ? `${formatCurrency(row.payout.verifiedAmount ?? row.payout.expectedAmount, 2)} · ${row.payout.status}`
+          : '—',
+    },
+    { title: '提交时间', dataIndex: 'createdAt', render: formatDate },
+    {
+      title: '操作',
+      key: 'action',
+      fixed: 'right',
+      render: (_, row) => (
+        <Space wrap>
+          <Button type="link" onClick={() => setSelected(row)}>
+            详情
+          </Button>
+          {row.status === 'open' ? (
+            <>
+              <Button
+                type="link"
+                onClick={() => {
+                  setResolutionTarget({ appeal: row, decision: 'accepted' })
+                  setResolutionText('')
+                }}
+              >
+                接受
+              </Button>
+              <Button
+                danger
+                type="link"
+                onClick={() => {
+                  setResolutionTarget({ appeal: row, decision: 'rejected' })
+                  setResolutionText('')
+                }}
+              >
+                驳回
+              </Button>
+            </>
+          ) : null}
+        </Space>
+      ),
+    },
+  ]
+  const handleResolve = async () => {
+    if (!resolutionTarget || !resolutionText.trim()) {
+      message.error('请填写处理说明')
+      return
+    }
+    await onResolve(
+      resolutionTarget.appeal.appealId,
+      resolutionTarget.decision,
+      resolutionText.trim(),
+    )
+    setResolutionTarget(null)
+    setResolutionText('')
+  }
+  return (
+    <>
+      <Row gutter={[12, 12]} className="section-block">
+        <Col xs={12} sm={6}>
+          <Statistic title="待处理" value={summary?.open ?? 0} />
+        </Col>
+        <Col xs={12} sm={6}>
+          <Statistic title="已接受" value={summary?.accepted ?? 0} />
+        </Col>
+        <Col xs={12} sm={6}>
+          <Statistic title="已驳回" value={summary?.rejected ?? 0} />
+        </Col>
+        <Col xs={12} sm={6}>
+          <Statistic title="全部申诉" value={summary?.total ?? 0} />
+        </Col>
+      </Row>
+      <Card className="filter-card" size="small">
+        <Space wrap>
+          <Select
+            value={status}
+            onChange={onStatusChange}
+            aria-label="申诉状态"
+            options={[
+              { value: 'open', label: '待处理' },
+              { value: 'accepted', label: '已接受' },
+              { value: 'rejected', label: '已驳回' },
+              { value: 'withdrawn', label: '已撤回' },
+              { value: 'all', label: '全部状态' },
+            ]}
+          />
+          <Select
+            allowClear
+            value={target || undefined}
+            onChange={(value) => onTargetChange(value ?? '')}
+            placeholder="全部申诉对象"
+            options={[
+              { value: 'task', label: '任务争议' },
+              { value: 'payout', label: '报酬争议' },
+            ]}
+            className="scope-input"
+          />
+          <Input
+            allowClear
+            value={merchantId}
+            onChange={(event) => onMerchantIdChange(event.target.value)}
+            placeholder="商户 ID"
+            className="scope-input"
+          />
+          <Input
+            allowClear
+            value={creatorId}
+            onChange={(event) => onCreatorIdChange(event.target.value)}
+            placeholder="创作者 ID"
+            className="scope-input"
+          />
+          <Input
+            allowClear
+            value={taskId}
+            onChange={(event) => onTaskIdChange(event.target.value)}
+            placeholder="Creator Task ID"
+            className="scope-input"
+          />
+          <Button icon={<ReloadOutlined spin={loading} />} onClick={onRefresh} loading={loading}>
+            刷新队列
+          </Button>
+        </Space>
+      </Card>
+      <Card>
+        <Table
+          rowKey="appealId"
+          columns={columns}
+          dataSource={items}
+          loading={loading}
+          scroll={{ x: 1180 }}
+          pagination={{
+            current: data?.pagination.page ?? page,
+            pageSize: data?.pagination.pageSize ?? 20,
+            total: data?.pagination.total ?? 0,
+            showSizeChanger: false,
+            onChange: onPageChange,
+          }}
+          locale={{
+            emptyText: status === 'open' ? '当前没有待处理申诉' : '当前没有符合条件的申诉',
+          }}
+        />
+      </Card>
+      <Modal
+        open={Boolean(selected)}
+        title="申诉详情"
+        onCancel={() => setSelected(null)}
+        footer={<Button onClick={() => setSelected(null)}>关闭</Button>}
+        width={820}
+      >
+        {selected ? (
+          <Descriptions bordered size="small" column={2}>
+            <Descriptions.Item label="创作者">
+              {selected.creator?.nickname || '未命名创作者'}
+            </Descriptions.Item>
+            <Descriptions.Item label="联系电话">{selected.creator?.phone || '—'}</Descriptions.Item>
+            <Descriptions.Item label="任务状态">{selected.task?.status || '—'}</Descriptions.Item>
+            <Descriptions.Item label="申诉对象">
+              {formatAppealTarget(selected.target)}
+            </Descriptions.Item>
+            <Descriptions.Item label="申诉原因" span={2}>
+              {selected.reason}
+            </Descriptions.Item>
+            <Descriptions.Item label="证据" span={2}>
+              <Typography.Paragraph style={{ margin: 0, whiteSpace: 'pre-wrap' }}>
+                {JSON.stringify(selected.evidence, null, 2)}
+              </Typography.Paragraph>
+            </Descriptions.Item>
+            <Descriptions.Item label="历史处理" span={2}>
+              {selected.resolution || '尚未处理'}
+            </Descriptions.Item>
+          </Descriptions>
+        ) : null}
+      </Modal>
+      <Modal
+        open={Boolean(resolutionTarget)}
+        title={resolutionTarget?.decision === 'accepted' ? '接受申诉' : '驳回申诉'}
+        onCancel={() => setResolutionTarget(null)}
+        onOk={() => void handleResolve()}
+        okText="确认处理"
+        cancelText="取消"
+      >
+        <Input.TextArea
+          autoFocus
+          value={resolutionText}
+          onChange={(event) => setResolutionText(event.target.value)}
+          placeholder="请填写处理说明，系统会写入审计并通知创作者"
+          rows={5}
+        />
+      </Modal>
     </>
   )
 }
@@ -1154,7 +1736,7 @@ function TaskWorkbenchDetail({ data }: { data: CreatorTaskWorkbench }) {
     </>
   )
 }
-function AuditTable<T extends Record<string, unknown>>({
+function AuditTable<T extends object>({
   rows,
   idKey,
   columns,
@@ -1272,7 +1854,7 @@ function FinanceTable({
 }) {
   const columns: ColumnsType<Reconciliation> = [
     { title: '收入类型', dataIndex: 'type' },
-    { title: '金额', dataIndex: 'amount', render: formatCurrency },
+    { title: '金额', dataIndex: 'amount', render: (value: number) => formatCurrency(value) },
     { title: '记账日期', dataIndex: 'date', render: formatDate },
     { title: '说明', dataIndex: 'description', render: (v) => v ?? '—' },
     {
@@ -1424,15 +2006,52 @@ function Metric(props: {
 function formatNumber(value: number) {
   return new Intl.NumberFormat('zh-CN').format(value)
 }
-function formatCurrency(value: number) {
+function formatCurrency(value: number, maximumFractionDigits = 0) {
   return new Intl.NumberFormat('zh-CN', {
     style: 'currency',
     currency: 'CNY',
-    maximumFractionDigits: 0,
+    maximumFractionDigits,
   }).format(value)
+}
+function formatPercent(value: number | null | undefined) {
+  return value === null || value === undefined ? '暂无' : `${(value * 100).toFixed(1)}%`
 }
 function formatDate(value: string) {
   return value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '—'
+}
+function formatFinancialClassification(value: string) {
+  return (
+    {
+      revenue: '收入',
+      cogs: 'Creator Payout COGS',
+      operating_cost: '运营成本',
+      reserve: '风险准备金',
+    }[value] ?? value
+  )
+}
+function formatAppealTarget(value: CreatorTaskAppeal['target']) {
+  return value === 'payout' ? '报酬争议' : '任务争议'
+}
+function formatAppealStatus(value: CreatorTaskAppeal['status']) {
+  const labels: Record<CreatorTaskAppeal['status'], string> = {
+    open: '待处理',
+    accepted: '已接受',
+    rejected: '已驳回',
+    withdrawn: '已撤回',
+  }
+  const colors: Record<CreatorTaskAppeal['status'], string> = {
+    open: 'warning',
+    accepted: 'success',
+    rejected: 'error',
+    withdrawn: 'default',
+  }
+  return <Tag color={colors[value]}>{labels[value]}</Tag>
+}
+function shortId(value: string | null) {
+  return value ? `${value.slice(0, 8)}...` : '—'
+}
+function emptyText(value: string | null) {
+  return value || '—'
 }
 function severityLabel(value: DashboardAlert['severity']) {
   return value === 'critical' ? '严重' : value === 'warning' ? '警告' : '注意'

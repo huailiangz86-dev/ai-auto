@@ -20,6 +20,7 @@ import {
   CreatorTaskController,
   MerchantGrowthTaskController,
 } from './growth-task.controller'
+import { AdminCreatorPayoutController, CreatorPortalController } from './creator-portal.controller'
 import { MerchantGrowthPlanController } from './growth-plan.controller'
 import { GrowthTaskService } from './growth-task.service'
 import { GrowthPlanService } from './growth-plan.service'
@@ -28,9 +29,12 @@ import { GrowthReportService } from './growth-report.service'
 import { IncrementalityMeasurementService } from './incrementality-measurement.service'
 import { OperationsWorkbenchService } from './operations-workbench.service'
 import { CreatorMatchingService } from './creator-matching.service'
+import { CreatorPayoutSettlementService } from './creator-payout-settlement.service'
+import { CreatorPortalService } from './creator-portal.service'
 import { AgentTaskController, MerchantTaskController } from './sharing-task.controller'
 import { SharingTaskService } from './sharing-task.service'
 import { CampaignCreditLedgerEntry, CreatorTask, GrowthTask } from './entities/growth-task.entity'
+import { CreatorTaskAppeal, CreatorTaskPayout } from './entities/creator-task-payout.entity'
 import { GrowthPlan } from './entities/growth-plan.entity'
 import { CampaignBudgetAllocation } from './entities/campaign-budget-allocation.entity'
 import { IncrementalityMeasurement } from './entities/incrementality-measurement.entity'
@@ -60,6 +64,8 @@ import { CustomerAttribution } from '../customer/entities/customer-attribution.e
       IncrementalityMeasurement,
       CreatorTask,
       CampaignCreditLedgerEntry,
+      CreatorTaskPayout,
+      CreatorTaskAppeal,
       AuditLog,
       FinancialLedgerEntry,
       Content,
@@ -77,6 +83,8 @@ import { CustomerAttribution } from '../customer/entities/customer-attribution.e
     MerchantGrowthPlanController,
     CreatorTaskController,
     AdminCreatorTaskController,
+    CreatorPortalController,
+    AdminCreatorPayoutController,
   ],
   providers: [
     SharingTaskService,
@@ -87,6 +95,8 @@ import { CustomerAttribution } from '../customer/entities/customer-attribution.e
     IncrementalityMeasurementService,
     OperationsWorkbenchService,
     CreatorMatchingService,
+    CreatorPortalService,
+    CreatorPayoutSettlementService,
   ],
   exports: [SharingTaskService, GrowthTaskService],
 })

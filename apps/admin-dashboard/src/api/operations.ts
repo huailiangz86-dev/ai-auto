@@ -2,7 +2,11 @@ import { ApiError } from './dashboard'
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3000/api/v1'
 
-type Envelope<T> = { code?: number; data?: T; message?: string }
+interface Envelope<T> {
+  code?: number
+  data?: T
+  message?: string
+}
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const token = window.localStorage.getItem('admin_access_token')
@@ -23,15 +27,15 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     throw new ApiError(message, response.status)
   }
   return typeof payload === 'object' && 'data' in payload && payload.data !== undefined
-    ? (payload.data as T)
+    ? payload.data
     : (payload as T)
 }
 
-export type PageResult<T> = {
+export interface PageResult<T> {
   items: T[]
   pagination: { page: number; pageSize: number; total: number; totalPages: number }
 }
-export type PendingMerchant = {
+export interface PendingMerchant {
   merchantId: string
   businessName: string
   contactName: string
@@ -40,13 +44,13 @@ export type PendingMerchant = {
   industryCategory: string
   appliedAt: string
 }
-export type PendingAgent = {
+export interface PendingAgent {
   agentId: string
   phone: string
   nickname: string | null
   registeredAt: string
 }
-export type FraudAlert = {
+export interface FraudAlert {
   alertId: string
   type: string
   severity: string
@@ -55,7 +59,44 @@ export type FraudAlert = {
   evidence: unknown
   createdAt: string
 }
-export type Reconciliation = {
+export const RISK_RULE_TRIGGER_TYPES = [
+  'redemption_frequency',
+  'redemption_rate',
+  'self_redemption',
+  'ip_clustering',
+  'device_clustering',
+  'commission_anomaly',
+  'content_violation',
+] as const
+export const RISK_RULE_ACTIONS = [
+  'create_alert',
+  'manual_review',
+  'freeze_commission',
+  'pause_campaign',
+  'restrict_relationship',
+] as const
+export interface RiskRule {
+  id: string
+  ruleKey: string
+  name: string
+  triggerType: (typeof RISK_RULE_TRIGGER_TYPES)[number]
+  severity: 'critical' | 'warning' | 'notice'
+  conditionConfig: {
+    windowMinutes?: number
+    threshold?: number
+    multiplier?: number
+    metric?: string
+    scope?: string
+  }
+  actions: (typeof RISK_RULE_ACTIONS)[number][]
+  description: string | null
+  enabled: boolean
+  version: number
+  createdAt: string
+  updatedAt: string
+  updatedByAdminId: string | null
+}
+export interface Reconciliation {
   id: string
   type: string
   amount: number
@@ -66,7 +107,42 @@ export type Reconciliation = {
   settled: boolean
   settledAt: string | null
 }
-export type ModerationContent = {
+export type FinancialClassification = 'revenue' | 'cogs' | 'operating_cost' | 'reserve'
+export interface FinancialLedgerEntry {
+  entryId: string
+  classification: FinancialClassification
+  entryType: string
+  amount: number
+  currency: string
+  merchantId: string | null
+  campaignId: string | null
+  creatorId: string | null
+  creatorTaskId: string | null
+  sourceReference: string | null
+  occurredAt: string
+  description: string | null
+  metadata: Record<string, unknown> | null
+  recordedByAdminId: string | null
+}
+export interface CampaignEconomics {
+  scope: { campaignId: string | null; merchantId: string | null }
+  totals: {
+    merchantGrowthRevenue: number
+    creatorPayoutCogs: number
+    operatingCost: number
+    riskReserve: number
+    grossProfit: number
+    grossMargin: number | null
+  }
+  summary: {
+    entryCount: number
+    totalCost: number
+    netResult: number
+    byEntryType: Record<string, number>
+  }
+  entries: FinancialLedgerEntry[]
+}
+export interface ModerationContent {
   id: string
   type: string
   platform: string | null
@@ -77,7 +153,7 @@ export type ModerationContent = {
   trackingUrl: string | null
   createdAt: string
 }
-export type OperationAuditLog = {
+export interface OperationAuditLog {
   id: string
   actorType: string
   actorId: string | null
@@ -113,12 +189,35 @@ export const resolveFraudAlert = (
     method: 'POST',
     body: JSON.stringify({ action, note }),
   })
+export const getRiskRules = (query: { enabled?: boolean; triggerType?: string } = {}) =>
+  request<{ items: RiskRule[]; summary: { total: number; enabled: number; disabled: number } }>(
+    `/admin/risk-rules${queryString(query)}`,
+  )
+export const createRiskRule = (payload: {
+  name: string
+  ruleKey: string
+  triggerType: RiskRule['triggerType']
+  severity: RiskRule['severity']
+  conditionConfig: RiskRule['conditionConfig']
+  actions: RiskRule['actions']
+  description?: string
+  enabled?: boolean
+}) => request<RiskRule>('/admin/risk-rules', { method: 'POST', body: JSON.stringify(payload) })
+export const updateRiskRule = (
+  id: string,
+  payload: Partial<Parameters<typeof createRiskRule>[0]>,
+) =>
+  request<RiskRule>(`/admin/risk-rules/${id}`, { method: 'PATCH', body: JSON.stringify(payload) })
+export const deleteRiskRule = (id: string) =>
+  request(`/admin/risk-rules/${id}`, { method: 'DELETE' })
 export const getReconciliations = () =>
   request<{ summary: { pendingAmount: number }; items: Reconciliation[] }>(
     '/admin/finance/reconciliations?status=pending',
   )
 export const settleReconciliation = (id: string) =>
   request(`/admin/finance/reconciliations/${id}/settle`, { method: 'POST', body: '{}' })
+export const getCampaignEconomics = (query: Record<string, string | number | undefined> = {}) =>
+  request<CampaignEconomics>(`/admin/finance/campaign-economics${queryString(query)}`)
 export const getModerationContents = () =>
   request<PageResult<ModerationContent>>('/admin/contents/moderation?status=pending')
 export const moderateContent = (
@@ -133,7 +232,7 @@ export const moderateContent = (
 export const getOperationAuditLogs = () =>
   request<PageResult<OperationAuditLog>>('/admin/audit-logs')
 
-export type CreatorTaskQueueItem = {
+export interface CreatorTaskQueueItem {
   id: string
   growthTaskId: string
   campaignId: string | null
@@ -162,7 +261,7 @@ export type CreatorTaskQueueItem = {
   createdAt: string
   updatedAt: string
 }
-export type CreatorTaskWorkbench = {
+export interface CreatorTaskWorkbench {
   task: CreatorTaskQueueItem
   growthTask: {
     id: string
@@ -181,18 +280,66 @@ export type CreatorTaskWorkbench = {
     campaignCredits: { allocated: number; consumed: number; remaining: number; ledger: unknown[] }
     financialEntries: unknown[]
   }
-  evidence: Array<{
+  evidence: {
     id: string
     contentType: string
     creatorStudioAction: string | null
     contentData: Record<string, unknown> | null
     createdAt: string
     publications: unknown[]
-  }>
+  }[]
   auditRecords: unknown[]
   notifications: unknown[]
 }
-export type CreatorTaskQueueQuery = {
+export interface CreatorTaskAppeal {
+  appealId: string
+  creatorTaskId: string
+  creatorId: string
+  payoutId: string | null
+  target: 'task' | 'payout'
+  status: 'open' | 'accepted' | 'rejected' | 'withdrawn'
+  reason: string
+  evidence: Record<string, unknown>
+  resolution: string | null
+  resolvedBy: string | null
+  resolvedAt: string | null
+  createdAt: string
+  updatedAt: string
+  creator: {
+    creatorId: string
+    nickname: string | null
+    phone: string
+    realNameVerified: boolean
+    auditStatus: string
+    growthScore: number
+    growthLevel: number
+  } | null
+  task: {
+    id: string
+    growthTaskId: string
+    campaignId: string | null
+    merchantId: string
+    channel: string
+    contentType: string
+    brief: string
+    deadline: string
+    status: string
+    baseReward: number
+    reviewReason: string | null
+    riskHoldReason: string | null
+  } | null
+  payout: {
+    payoutId?: string
+    status: string
+    expectedAmount: number
+    verifiedAmount: number | null
+    verificationEvidence?: Record<string, unknown>
+    verifiedAt?: string | null
+    settleAt: string | null
+    settledAt?: string | null
+  } | null
+}
+export interface CreatorTaskQueueQuery {
   campaignId?: string
   merchantId?: string
   creatorId?: string
@@ -201,7 +348,16 @@ export type CreatorTaskQueueQuery = {
   page?: number
   pageSize?: number
 }
-function queryString(query: CreatorTaskQueueQuery) {
+export interface CreatorTaskAppealQuery {
+  status?: 'all' | 'open' | 'accepted' | 'rejected' | 'withdrawn'
+  target?: 'task' | 'payout'
+  merchantId?: string
+  creatorId?: string
+  creatorTaskId?: string
+  page?: number
+  pageSize?: number
+}
+function queryString(query: object) {
   const params = new URLSearchParams()
   Object.entries(query).forEach(([key, value]) => {
     if (value !== undefined && value !== '') params.set(key, String(value))
@@ -233,7 +389,22 @@ export const resolveCreatorTaskRisk = (
     method: 'POST',
     body: JSON.stringify({ action, reason }),
   })
-export type PilotOperationsMetrics = {
+export const getCreatorTaskAppeals = (query: CreatorTaskAppealQuery = {}) =>
+  request<
+    PageResult<CreatorTaskAppeal> & {
+      summary: Record<'open' | 'accepted' | 'rejected' | 'withdrawn' | 'total', number>
+    }
+  >(`/admin/creator-tasks/appeals${queryString(query)}`)
+export const resolveCreatorTaskAppeal = (
+  id: string,
+  decision: 'accepted' | 'rejected',
+  resolution: string,
+) =>
+  request<CreatorTaskAppeal>(`/admin/creator-tasks/appeals/${id}/resolve`, {
+    method: 'POST',
+    body: JSON.stringify({ decision, resolution }),
+  })
+export interface PilotOperationsMetrics {
   activatedCampaigns: number
   merchants: number
   repeatCampaignRate: number
@@ -248,7 +419,7 @@ export type PilotOperationsMetrics = {
     measurableCampaigns: number
   }
 }
-export type PilotWeeklyEvidence = {
+export interface PilotWeeklyEvidence {
   week: { startAt: string; endAt: string }
   summary: {
     campaigns: number
@@ -261,7 +432,7 @@ export type PilotWeeklyEvidence = {
     acceptedCreatorTasks: number
     discrepancyCount: number
   }
-  discrepancies: Array<{
+  discrepancies: {
     redemptionId: string
     campaignId: string | null
     transactionAmount: number
@@ -272,7 +443,7 @@ export type PilotWeeklyEvidence = {
     creatorPayout: { payoutId: string; status: string; amount: number } | null
     reportIncluded: boolean
     missingStages: string[]
-  }>
+  }[]
 }
 export const getPilotOperationsMetrics = () =>
   request<PilotOperationsMetrics>('/admin/pilot-instrumentation/operations-metrics')

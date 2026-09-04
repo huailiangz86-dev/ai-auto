@@ -74,6 +74,18 @@ export default [
     },
   },
 
+  // Browser globals for frontend applications
+  {
+    files: ['apps/*-dashboard/src/**/*.{ts,tsx}'],
+    languageOptions: {
+      globals: {
+        document: 'readonly',
+        fetch: 'readonly',
+        window: 'readonly',
+      },
+    },
+  },
+
   // JSON files
   {
     files: ['**/*.json'],

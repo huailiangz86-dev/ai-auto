@@ -2,7 +2,7 @@ import { AuditStatus } from '@ai-auto/shared'
 import { AgentPlatformAccount } from '../agent/entities/agent-platform-account.entity'
 import { SharingAgent } from '../agent/entities/sharing-agent.entity'
 import { Store } from '../merchant/entities/store.entity'
-import { CampaignBudgetAllocation } from './entities/campaign-budget-allocation.entity'
+import { MerchantAgentBinding } from '../merchant/entities/merchant-agent-binding.entity'
 import { CreatorTask, GrowthTask } from './entities/growth-task.entity'
 import { CreatorMatchingService } from './creator-matching.service'
 
@@ -38,28 +38,29 @@ describe('CreatorMatchingService', () => {
     { category: 'campaign_credits', status: 'funded', committedAmount: 100 },
   ]
 
-  function setup() {
+  function setup(bindings: any[] = []) {
     const manager: any = {
-      findOne: jest.fn(async (entity) => (entity === GrowthTask ? growth : null)),
-      find: jest.fn(async (entity) => {
+      findOne: jest.fn((entity) => Promise.resolve(entity === GrowthTask ? growth : null)),
+      find: jest.fn((entity) => {
         if (entity === SharingAgent) return [creator]
         if (entity === AgentPlatformAccount)
           return [{ agentId: creatorId, platformType: 'douyin', status: true }]
         if (entity === CreatorTask) return []
+        if (entity === MerchantAgentBinding) return bindings
         if (entity === Store) return []
         return []
       }),
-      getRepository: jest.fn(() => ({ find: jest.fn(async () => allocation) })),
+      getRepository: jest.fn(() => ({ find: jest.fn(() => Promise.resolve(allocation)) })),
       create: jest.fn((_entity, value) => value),
-      save: jest.fn(async (entity, value) => {
+      save: jest.fn((entity, value) => {
         const saved = value ?? entity
         if (entity === CreatorTask && Array.isArray(value))
-          return value.map((item, index) => ({ ...item, id: `task-${index}` }))
-        return saved
+          return Promise.resolve(value.map((item, index) => ({ ...item, id: `task-${index}` })))
+        return Promise.resolve(saved)
       }),
     }
-    const growthRepo: any = { findOne: jest.fn(async () => growth), manager }
-    const allocationRepo: any = { find: jest.fn(async () => allocation) }
+    const growthRepo: any = { findOne: jest.fn(() => Promise.resolve(growth)), manager }
+    const allocationRepo: any = { find: jest.fn(() => Promise.resolve(allocation)) }
     const dataSource: any = { transaction: jest.fn((callback) => callback(manager)) }
     return { service: new CreatorMatchingService(growthRepo, allocationRepo, dataSource), manager }
   }
@@ -103,5 +104,56 @@ describe('CreatorMatchingService', () => {
       CreatorTask,
       expect.arrayContaining([expect.objectContaining({ status: 'invited' })]),
     )
+  })
+
+  it('excludes creators whose merchant relationship is restricted or unbound', async () => {
+    const restricted = setup([
+      {
+        merchantId,
+        agentId: creatorId,
+        bindingStatus: 'active',
+        restrictedAt: new Date(),
+        unboundAt: null,
+      },
+    ])
+    await expect(
+      restricted.service.listMatches(merchantId, growthTaskId, { channel: 'douyin' }),
+    ).resolves.toMatchObject({ items: [] })
+
+    const unbound = setup([
+      {
+        merchantId,
+        agentId: creatorId,
+        bindingStatus: 'unbound',
+        restrictedAt: null,
+        unboundAt: new Date(),
+      },
+    ])
+    await expect(
+      unbound.service.listMatches(merchantId, growthTaskId, { channel: 'douyin' }),
+    ).resolves.toMatchObject({ items: [] })
+  })
+
+  it('keeps a creator eligible when an active unrestricted relationship remains', async () => {
+    const { service } = setup([
+      {
+        merchantId,
+        agentId: creatorId,
+        bindingStatus: 'unbound',
+        restrictedAt: null,
+        unboundAt: new Date(),
+      },
+      {
+        merchantId,
+        agentId: creatorId,
+        bindingStatus: 'active',
+        restrictedAt: null,
+        unboundAt: null,
+      },
+    ])
+
+    const result = await service.listMatches(merchantId, growthTaskId, { channel: 'douyin' })
+    expect(result.items).toHaveLength(1)
+    expect(result.items[0].creatorId).toBe(creatorId)
   })
 })

@@ -1,7 +1,8 @@
 import { Column, Entity, Index } from 'typeorm'
 import { BaseEntity } from '../../common/entities/base.entity'
 
-export type CreatorTaskPayoutStatus = 'estimated' | 'verified' | 'settled' | 'risk_hold' | 'rejected'
+export type CreatorTaskPayoutStatus =
+  'estimated' | 'verified' | 'settled' | 'risk_hold' | 'rejected'
 
 @Entity('creator_task_payouts')
 @Index('idx_creator_task_payout_creator_status', ['creatorId', 'status'])
@@ -11,14 +12,19 @@ export class CreatorTaskPayout extends BaseEntity {
   @Column({ name: 'creator_id', type: 'uuid' }) creatorId!: string
   @Column({ name: 'merchant_id', type: 'uuid' }) merchantId!: string
   @Column({ name: 'campaign_id', type: 'uuid', nullable: true }) campaignId?: string | null
-  @Column({ name: 'expected_amount', type: 'decimal', precision: 14, scale: 2 }) expectedAmount!: number
-  @Column({ name: 'verified_amount', type: 'decimal', precision: 14, scale: 2, nullable: true }) verifiedAmount?: number | null
+  @Column({ name: 'expected_amount', type: 'decimal', precision: 14, scale: 2 })
+  expectedAmount!: number
+  @Column({ name: 'verified_amount', type: 'decimal', precision: 14, scale: 2, nullable: true })
+  verifiedAmount?: number | null
   @Column({ type: 'varchar', length: 24, default: 'estimated' }) status!: CreatorTaskPayoutStatus
-  @Column({ name: 'verification_evidence', type: 'jsonb', default: () => "'{}'::jsonb" }) verificationEvidence!: Record<string, unknown>
+  @Column({ name: 'verification_evidence', type: 'jsonb', default: () => "'{}'::jsonb" })
+  verificationEvidence!: Record<string, unknown>
   @Column({ name: 'verified_at', type: 'timestamptz', nullable: true }) verifiedAt?: Date | null
   @Column({ name: 'settle_at', type: 'date', nullable: true }) settleAt?: Date | null
   @Column({ name: 'settled_at', type: 'timestamptz', nullable: true }) settledAt?: Date | null
   @Column({ name: 'risk_hold_reason', type: 'text', nullable: true }) riskHoldReason?: string | null
+  @Column({ name: 'risk_hold_previous_status', type: 'varchar', length: 24, nullable: true })
+  riskHoldPreviousStatus?: CreatorTaskPayoutStatus | null
 }
 
 export type CreatorTaskAppealStatus = 'open' | 'accepted' | 'rejected' | 'withdrawn'

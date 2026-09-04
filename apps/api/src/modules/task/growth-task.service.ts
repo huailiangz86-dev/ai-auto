@@ -6,6 +6,7 @@ import { AuditLog } from '../admin/entities/audit-log.entity'
 import { FinancialLedgerEntry } from '../admin/entities/financial-ledger-entry.entity'
 import { Notification } from '../notification/entities/notification.entity'
 import { SharingAgent } from '../agent/entities/sharing-agent.entity'
+import { AgentWallet } from '../agent/entities/agent-wallet.entity'
 import { PilotInstrumentationService } from '../pilot/pilot-instrumentation.service'
 import { PilotMeasurementService } from '../pilot/pilot-measurement.service'
 import { CreateCreatorTaskDto, CreateGrowthTaskDto } from './dto/growth-task.dto'
@@ -20,7 +21,10 @@ import {
   GrowthTaskStatus,
 } from './entities/growth-task.entity'
 
-type Actor = { id: string; type: 'merchant' | 'creator' | 'admin' | 'system' }
+interface Actor {
+  id: string
+  type: 'merchant' | 'creator' | 'admin' | 'system'
+}
 const TERMINAL_CREATOR_STATES: CreatorTaskStatus[] = [
   'settled',
   'expired',
@@ -270,29 +274,52 @@ export class GrowthTaskService {
 
   async holdForRisk(creatorTaskId: string, actorId: string, reason: string) {
     return this.dataSource.transaction(async (manager) => {
-      const task = await this.requireCreatorTask(manager, creatorTaskId)
+      const task = await this.requireCreatorTask(manager, creatorTaskId, true)
       if (TERMINAL_CREATOR_STATES.includes(task.status) || task.status === 'risk_hold')
         throw new BadRequestException('该任务不能进入风控暂停')
+      const payout = await manager.findOne(CreatorTaskPayout, {
+        where: { creatorTaskId },
+        lock: { mode: 'pessimistic_write' },
+      })
+      if (payout?.status === 'settled')
+        throw new BadRequestException('报酬已结算，不能再将任务置于风控暂停')
+      if (payout && !['estimated', 'verified'].includes(payout.status))
+        throw new BadRequestException('报酬当前状态不能进入风控暂停')
       const before = task.status
+      const payoutBefore = payout?.status ?? null
       task.status = 'risk_hold'
       task.riskHoldPreviousStatus = before
       task.riskHoldReason = reason
       task.stateChangedBy = actorId
       task.stateChangedAt = new Date()
+      const stateChangedAt = task.stateChangedAt
       await manager.save(task)
+      if (payout && ['estimated', 'verified'].includes(payout.status)) {
+        payout.riskHoldPreviousStatus = payout.status
+        payout.status = 'risk_hold'
+        payout.riskHoldReason = reason
+        await manager.save(payout)
+      }
       await this.audit(
         manager,
         { id: actorId, type: 'admin' },
         AuditActionType.CREATOR_TASK_RISK_HELD,
         'creator_task',
         task.id,
-        { before, after: 'risk_hold', reason },
+        {
+          before,
+          after: 'risk_hold',
+          reason,
+          payoutId: payout?.id ?? null,
+          payoutBefore,
+          payoutAfter: payout?.status ?? null,
+        },
       )
       await this.instrumentation.record(
         {
           eventType: 'task_risk_held',
           idempotencyKey:
-            'pilot:creator-task:' + task.id + ':risk-hold:' + task.stateChangedAt!.getTime(),
+            'pilot:creator-task:' + task.id + ':risk-hold:' + stateChangedAt.getTime(),
           subjectType: 'creator_task',
           subjectId: task.id,
           merchantId: task.merchantId,
@@ -300,7 +327,7 @@ export class GrowthTaskService {
           growthTaskId: task.growthTaskId,
           creatorId: task.creatorId,
           creatorTaskId: task.id,
-          occurredAt: task.stateChangedAt!,
+          occurredAt: stateChangedAt,
           metadata: { before, reason },
         },
         manager,
@@ -326,14 +353,39 @@ export class GrowthTaskService {
     reason: string,
   ) {
     return this.dataSource.transaction(async (manager) => {
-      const task = await this.requireCreatorTask(manager, creatorTaskId)
+      const task = await this.requireCreatorTask(manager, creatorTaskId, true)
       if (task.status !== 'risk_hold') throw new BadRequestException('任务当前不在风控暂停状态')
+      const payout = await manager.findOne(CreatorTaskPayout, {
+        where: { creatorTaskId },
+        lock: { mode: 'pessimistic_write' },
+      })
+      if (payout?.status === 'settled')
+        throw new BadRequestException('报酬已结算，无法处理风控暂停任务')
       const target: CreatorTaskStatus =
         action === 'violation' ? 'violation' : (task.riskHoldPreviousStatus ?? 'accepted')
+      const payoutBefore = payout?.status ?? null
+      if (payout) {
+        if (action === 'violation') {
+          const previousStatus = this.payoutStatusBeforeRiskHold(payout)
+          if (previousStatus === 'verified') await this.reversePendingPayout(manager, payout)
+          payout.status = 'rejected'
+          payout.riskHoldPreviousStatus = null
+          payout.riskHoldReason = reason
+          await manager.save(payout)
+        } else if (payout.status === 'risk_hold') {
+          payout.status = this.payoutStatusBeforeRiskHold(payout)
+          payout.riskHoldPreviousStatus = null
+          payout.riskHoldReason = null
+          await manager.save(payout)
+        } else if (!['estimated', 'verified'].includes(payout.status)) {
+          throw new BadRequestException('报酬当前状态不能解除风控暂停')
+        }
+      }
       task.status = target
       task.stateReason = reason
       task.stateChangedBy = actorId
       task.stateChangedAt = new Date()
+      const stateChangedAt = task.stateChangedAt
       await manager.save(task)
       await this.audit(
         manager,
@@ -341,13 +393,22 @@ export class GrowthTaskService {
         AuditActionType.CREATOR_TASK_RISK_HELD,
         'creator_task',
         task.id,
-        { before: 'risk_hold', after: target, action, reason },
+        {
+          before: 'risk_hold',
+          after: target,
+          action,
+          reason,
+          payoutId: payout?.id ?? null,
+          payoutBefore,
+          payoutAfter: payout?.status ?? null,
+          payoutAmount: payout?.verifiedAmount == null ? null : Number(payout.verifiedAmount),
+        },
       )
       await this.instrumentation.record(
         {
           eventType: 'task_risk_resolved',
           idempotencyKey:
-            'pilot:creator-task:' + task.id + ':risk-resolved:' + task.stateChangedAt!.getTime(),
+            'pilot:creator-task:' + task.id + ':risk-resolved:' + stateChangedAt.getTime(),
           subjectType: 'creator_task',
           subjectId: task.id,
           merchantId: task.merchantId,
@@ -355,7 +416,7 @@ export class GrowthTaskService {
           growthTaskId: task.growthTaskId,
           creatorId: task.creatorId,
           creatorTaskId: task.id,
-          occurredAt: task.stateChangedAt!,
+          occurredAt: stateChangedAt,
           metadata: { action, reason, after: target },
         },
         manager,
@@ -581,10 +642,45 @@ export class GrowthTaskService {
     })
   }
 
-  private async requireCreatorTask(manager: EntityManager, creatorTaskId: string) {
-    const task = await manager.findOne(CreatorTask, { where: { id: creatorTaskId } })
+  private async requireCreatorTask(manager: EntityManager, creatorTaskId: string, lock = false) {
+    const task = await manager.findOne(CreatorTask, {
+      where: { id: creatorTaskId },
+      ...(lock ? { lock: { mode: 'pessimistic_write' as const } } : {}),
+    })
     if (!task) throw new NotFoundException('创作者任务不存在')
     return task
+  }
+
+  private async reversePendingPayout(manager: EntityManager, payout: CreatorTaskPayout) {
+    const amount = Number(payout.verifiedAmount ?? 0)
+    if (!Number.isFinite(amount) || amount < 0)
+      throw new BadRequestException('核验报酬金额异常，无法冲销违规报酬')
+    if (amount === 0) return
+    const wallet = await manager.findOne(AgentWallet, {
+      where: { agentId: payout.creatorId },
+      lock: { mode: 'pessimistic_write' },
+    })
+    if (!wallet) throw new BadRequestException('创作者钱包不存在，无法冲销违规报酬')
+    const pending = Number(wallet.pendingSettlementBalance)
+    const totalEarned = Number(wallet.totalEarned)
+    if (pending < amount || totalEarned < amount)
+      throw new BadRequestException('创作者钱包余额与核验报酬不一致，无法安全冲销')
+    wallet.pendingSettlementBalance = this.money(pending - amount)
+    wallet.totalEarned = this.money(totalEarned - amount)
+    await manager.save(wallet)
+  }
+
+  private payoutStatusBeforeRiskHold(payout: CreatorTaskPayout): 'estimated' | 'verified' {
+    if (payout.status === 'estimated' || payout.status === 'verified') return payout.status
+    if (payout.riskHoldPreviousStatus === 'estimated') return 'estimated'
+    if (payout.riskHoldPreviousStatus === 'verified') return 'verified'
+    if (payout.status === 'risk_hold')
+      return payout.verifiedAt || payout.verifiedAmount != null ? 'verified' : 'estimated'
+    throw new BadRequestException('报酬当前状态不能处理风控结果')
+  }
+
+  private money(value: number) {
+    return Math.round(value * 100) / 100
   }
 
   private audit(

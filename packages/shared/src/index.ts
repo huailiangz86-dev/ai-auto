@@ -139,6 +139,9 @@ export enum AuditActionType {
   CREATOR_TASK_APPEALED = 'creator_task_appealed',
   CREATOR_TASK_PAYOUT_VERIFIED = 'creator_task_payout_verified',
   CREATOR_TASK_APPEAL_RESOLVED = 'creator_task_appeal_resolved',
+  RISK_RULE_CREATED = 'risk_rule_created',
+  RISK_RULE_UPDATED = 'risk_rule_updated',
+  RISK_RULE_DELETED = 'risk_rule_deleted',
 }
 
 // ---------- Customer Coupon Source ----------

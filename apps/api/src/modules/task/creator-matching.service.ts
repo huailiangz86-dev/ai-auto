@@ -10,6 +10,7 @@ import { Notification } from '../notification/entities/notification.entity'
 import { CreatorMatchQueryDto, InviteMatchedCreatorsDto } from './dto/creator-matching.dto'
 import { CampaignBudgetAllocation } from './entities/campaign-budget-allocation.entity'
 import { CampaignCreditLedgerEntry, CreatorTask, GrowthTask } from './entities/growth-task.entity'
+import { MerchantAgentBinding } from '../merchant/entities/merchant-agent-binding.entity'
 
 const NON_TERMINAL_STATUSES = new Set([
   'created',
@@ -25,7 +26,7 @@ const NON_TERMINAL_STATUSES = new Set([
   'risk_hold',
 ])
 
-type Match = {
+export interface Match {
   creatorId: string
   nickname: string | null
   avatar: string | null
@@ -106,8 +107,8 @@ export class CreatorMatchingService {
       const credits = Number(dto.campaignCredits ?? 0)
       const totalReward = reward * dto.creatorIds.length
       const totalCredits = credits * dto.creatorIds.length
-      const payoutBudget = allocations.find((item) => item.category === 'creator_payout')!
-      const creditsBudget = allocations.find((item) => item.category === 'campaign_credits')!
+      const payoutBudget = allocations.find((item) => item.category === 'creator_payout')
+      const creditsBudget = allocations.find((item) => item.category === 'campaign_credits')
       if (Number(growth.compensationReserved) + totalReward > Number(payoutBudget.committedAmount))
         throw new BadRequestException('创作者报酬预算不足，无法发出全部邀约')
       if (
@@ -160,7 +161,7 @@ export class CreatorMatchingService {
       await manager.save(
         AuditLog,
         saved.flatMap((task) => {
-          const match = matched.get(task.creatorId)!
+          const match = matched.get(task.creatorId)
           return [
             {
               actorType: 'merchant',
@@ -212,7 +213,7 @@ export class CreatorMatchingService {
               contentType: task.contentType,
               baseReward: reward,
               campaignCredits: credits,
-              matching: matched.get(task.creatorId)!.explanation,
+              matching: matched.get(task.creatorId).explanation,
             },
           }),
         ),
@@ -237,10 +238,11 @@ export class CreatorMatchingService {
     growth: GrowthTask,
     query: CreatorMatchQueryDto,
   ): Promise<Match[]> {
-    const [creators, accounts, existing, store] = await Promise.all([
+    const [creators, accounts, existing, bindings, store] = await Promise.all([
       manager.find(SharingAgent, { where: { status: true, auditStatus: AuditStatus.APPROVED } }),
       manager.find(AgentPlatformAccount, { where: { status: true } }),
       manager.find(CreatorTask),
+      manager.find(MerchantAgentBinding, { where: { merchantId: growth.merchantId } }),
       growth.storeId
         ? manager.findOne(Store, {
             where: { id: growth.storeId, merchantId: growth.merchantId, status: true },
@@ -260,13 +262,30 @@ export class CreatorMatchingService {
         ...(accountsByCreator.get(account.agentId) ?? []),
         account,
       ])
+    const bindingsByCreator = new Map<string, MerchantAgentBinding[]>()
+    for (const binding of bindings) {
+      if (!binding.agentId) continue
+      bindingsByCreator.set(binding.agentId, [
+        ...(bindingsByCreator.get(binding.agentId) ?? []),
+        binding,
+      ])
+    }
     return creators
       .flatMap((creator) => {
-      if (creator.blacklistedAt || creator.frozenAt || !creator.realNameVerified) return []
-      const activeTasks = tasksByCreator.get(creator.id) ?? []
-      if (activeTasks.some((task) => task.growthTaskId === growth.id)) return []
-      if (creator.creatorTaskLimit != null && activeTasks.length >= creator.creatorTaskLimit)
-        return []
+        if (creator.blacklistedAt || creator.frozenAt || !creator.realNameVerified) return []
+        const creatorBindings = bindingsByCreator.get(creator.id) ?? []
+        if (
+          creatorBindings.length > 0 &&
+          !creatorBindings.some(
+            (binding) =>
+              binding.bindingStatus === 'active' && !binding.restrictedAt && !binding.unboundAt,
+          )
+        )
+          return []
+        const activeTasks = tasksByCreator.get(creator.id) ?? []
+        if (activeTasks.some((task) => task.growthTaskId === growth.id)) return []
+        if (creator.creatorTaskLimit != null && activeTasks.length >= creator.creatorTaskLimit)
+          return []
         const matchedChannels = (accountsByCreator.get(creator.id) ?? [])
           .filter((account) => this.channelMatches(account.platformType, query.channel))
           .map((account) => account.platformType)

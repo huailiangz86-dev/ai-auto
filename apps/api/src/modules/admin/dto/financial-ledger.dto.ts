@@ -4,6 +4,7 @@ import {
   IsIn,
   IsNotEmpty,
   IsNumber,
+  IsObject,
   IsOptional,
   IsString,
   IsUUID,
@@ -66,6 +67,7 @@ export class CreateFinancialLedgerEntryDto {
   description?: string
 
   @IsOptional()
+  @IsObject()
   metadata?: Record<string, unknown>
 }
 

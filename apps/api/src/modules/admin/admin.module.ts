@@ -18,12 +18,16 @@ import { Content } from '../content/entities/content.entity'
 import { MerchantAgentBinding } from '../merchant/entities/merchant-agent-binding.entity'
 import { FinancialLedgerEntry } from './entities/financial-ledger-entry.entity'
 import { LifecycleNote } from './entities/lifecycle-note.entity'
+import { RiskRule } from './entities/risk-rule.entity'
+import { CreatorTaskPayout } from '../task/entities/creator-task-payout.entity'
 
 import { AdminController } from './admin.controller'
 import { LifecycleController } from './lifecycle.controller'
 import { AdminService } from './admin.service'
 import { FinancialLedgerService } from './financial-ledger.service'
 import { LifecycleService } from './lifecycle.service'
+import { RiskRuleController } from './risk-rule.controller'
+import { RiskRuleService } from './risk-rule.service'
 
 @Module({
   imports: [
@@ -41,10 +45,12 @@ import { LifecycleService } from './lifecycle.service'
       MerchantAgentBinding,
       FinancialLedgerEntry,
       LifecycleNote,
+      RiskRule,
+      CreatorTaskPayout,
     ]),
   ],
-  controllers: [AdminController, LifecycleController],
-  providers: [AdminService, FinancialLedgerService, LifecycleService],
+  controllers: [AdminController, LifecycleController, RiskRuleController],
+  providers: [AdminService, FinancialLedgerService, LifecycleService, RiskRuleService],
   exports: [AdminService],
 })
 export class AdminModule {}
