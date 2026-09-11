@@ -474,7 +474,7 @@ export class AdminService {
   async listPendingMerchants(query: ListPendingMerchantsDto) {
     const { page = 1, pageSize = 20 } = query
     const [merchants, total] = await this.merchantRepo.findAndCount({
-      where: { auditStatus: AuditStatus.PENDING },
+      where: { auditStatus: In([AuditStatus.PENDING, AuditStatus.NEED_INFO]) },
       order: { createdAt: 'ASC' }, // 先进先审
       skip: (page - 1) * pageSize,
       take: pageSize,
@@ -487,6 +487,7 @@ export class AdminService {
       phone: this.maskPhone(m.phone),
       businessType: m.businessType,
       industryCategory: m.industryCategory,
+      auditStatus: m.auditStatus,
       documents: [
         { type: 'business_license', label: '营业执照' },
         { type: 'id_card', label: '法人身份证' },
@@ -521,7 +522,7 @@ export class AdminService {
       })
     }
 
-    if (merchant.auditStatus !== AuditStatus.PENDING) {
+    if (![AuditStatus.PENDING, AuditStatus.NEED_INFO].includes(merchant.auditStatus)) {
       throw new BadRequestException({
         code: 2003,
         message: `当前状态不支持审核操作（${merchant.auditStatus}）`,
@@ -582,7 +583,7 @@ export class AdminService {
       })
     }
 
-    if (merchant.auditStatus !== AuditStatus.PENDING) {
+    if (![AuditStatus.PENDING, AuditStatus.NEED_INFO].includes(merchant.auditStatus)) {
       throw new BadRequestException({
         code: 2003,
         message: `当前状态不支持审核操作（${merchant.auditStatus}）`,
@@ -690,18 +691,29 @@ export class AdminService {
    * 待审核分享员列表
    */
   async listPendingAgents(query: ListPendingAgentsDto) {
-    const { page = 1, pageSize = 20 } = query
-    const [agents, total] = await this.agentRepo.findAndCount({
-      where: { auditStatus: AuditStatus.PENDING },
-      order: { createdAt: 'ASC' },
-      skip: (page - 1) * pageSize,
-      take: pageSize,
-    })
+    const { page = 1, pageSize = 20, keyword } = query
+    const qb = this.agentRepo
+      .createQueryBuilder('agent')
+      .where('agent.audit_status = :auditStatus', { auditStatus: AuditStatus.PENDING })
+    if (keyword?.trim()) {
+      qb.andWhere(
+        '(agent.nickname ILIKE :keyword OR agent.phone ILIKE :keyword OR agent.wechat_openid ILIKE :keyword OR agent.wechat_unionid ILIKE :keyword)',
+        { keyword: `%${keyword.trim()}%` },
+      )
+    }
+    const [agents, total] = await qb
+      .orderBy('agent.createdAt', 'ASC')
+      .skip((page - 1) * pageSize)
+      .take(pageSize)
+      .getManyAndCount()
 
     const items = agents.map((a) => ({
       agentId: a.id,
       phone: this.maskPhone(a.phone),
       nickname: a.nickname,
+      wechatOpenid: a.wechatOpenid ?? null,
+      wechatOpenidMasked: this.maskWechatId(a.wechatOpenid),
+      wechatUnionid: a.wechatUnionid ?? null,
       registeredAt: a.createdAt,
     }))
 
@@ -732,6 +744,12 @@ export class AdminService {
       throw new BadRequestException({
         code: 3005,
         message: `当前状态不支持审核操作（${agent.auditStatus}）`,
+      })
+    }
+    if (agent.agentType === 'professional_creator' && !agent.wechatOpenid) {
+      throw new BadRequestException({
+        code: 3010,
+        message: '专业达人须先通过微信小程序登录并绑定 OpenID，不能仅凭昵称审核',
       })
     }
 
@@ -1220,6 +1238,11 @@ export class AdminService {
   private maskPhone(phone: string): string {
     if (!phone || phone.length < 11) return phone
     return phone.slice(0, 3) + '****' + phone.slice(-4)
+  }
+
+  private maskWechatId(value?: string | null): string | null {
+    if (!value) return null
+    return value.length <= 10 ? value : `${value.slice(0, 6)}…${value.slice(-4)}`
   }
 
   private writeAudit(

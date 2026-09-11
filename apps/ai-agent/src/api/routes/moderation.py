@@ -6,6 +6,7 @@
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 from typing import Optional
+import asyncio
 from uuid import uuid4
 import structlog
 
@@ -40,6 +41,12 @@ class ModerationResponse(BaseModel):
     result: ModerationResult
     model: str  # Which moderation model was used
     processing_time_ms: int
+
+
+class BatchModerationResponse(BaseModel):
+    results: list[ModerationResponse | dict]
+    total_processed: int
+    total_failed: int
 
 
 @router.post("/check", response_model=ModerationResponse, status_code=status.HTTP_200_OK)
@@ -95,12 +102,39 @@ async def moderate_content(request: ModerationRequest):
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
-@router.post("/batch")
+@router.post("/batch", response_model=BatchModerationResponse)
 async def moderate_batch(requests: list[ModerationRequest]):
     """
     Batch content moderation.
 
     For checking multiple pieces of content in one request.
     """
-    # TODO: Implement batch moderation
-    return {"results": [], "total_processed": 0}
+    if not requests:
+        return BatchModerationResponse(results=[], total_processed=0, total_failed=0)
+    if len(requests) > 20:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="单次最多审核 20 条内容",
+        )
+
+    results = await asyncio.gather(
+        *(moderate_content(request) for request in requests),
+        return_exceptions=True,
+    )
+    items: list[ModerationResponse | dict] = []
+    failed = 0
+    for index, result in enumerate(results):
+        if isinstance(result, HTTPException):
+            failed += 1
+            items.append({"index": index, "status_code": result.status_code, "error": result.detail})
+        elif isinstance(result, Exception):
+            failed += 1
+            logger.exception("moderation.batch_item_failed", index=index, error=str(result))
+            items.append({"index": index, "status_code": 500, "error": "审核服务异常"})
+        else:
+            items.append(result)
+    return BatchModerationResponse(
+        results=items,
+        total_processed=len(items),
+        total_failed=failed,
+    )

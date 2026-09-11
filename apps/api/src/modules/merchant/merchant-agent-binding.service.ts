@@ -196,6 +196,17 @@ export class MerchantAgentBindingService {
     }
 
     const isApproved = dto.result === 'approved'
+    if (isApproved) {
+      const agent = binding.agentId
+        ? await this.agentRepo.findOne({ where: { id: binding.agentId } })
+        : null
+      if (!agent || !agent.status) {
+        throw new BadRequestException({ code: 9008, message: '分享员账号不可用，无法建立合作关系' })
+      }
+      if (agent.auditStatus !== AuditStatus.APPROVED) {
+        throw new BadRequestException({ code: 9009, message: '分享员尚未通过平台审核，无法建立合作关系' })
+      }
+    }
     await this.bindingRepo.update(bindingId, {
       bindingStatus: isApproved ? 'active' : 'rejected',
       auditStatus: isApproved ? AuditStatus.APPROVED : AuditStatus.REJECTED,

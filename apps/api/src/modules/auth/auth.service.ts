@@ -16,6 +16,7 @@ import * as bcrypt from 'bcrypt'
 import { ConfigService } from '@nestjs/config'
 import { TokenService, AuthTokens } from './services/token.service'
 import { SmsService } from './services/sms.service'
+import { AgentMiniProgramAuthService } from './services/agent-mini-program-auth.service'
 import { Merchant } from '../merchant/entities/merchant.entity'
 import { SharingAgent } from '../agent/entities/sharing-agent.entity'
 import { Admin } from '../admin/entities/admin.entity'
@@ -42,6 +43,7 @@ export class AuthService {
     private tokenService: TokenService,
     private smsService: SmsService,
     private configService: ConfigService,
+    private agentMiniProgramAuthService: AgentMiniProgramAuthService,
   ) {}
 
   // ==================== Merchant Auth ====================
@@ -104,6 +106,10 @@ export class AuthService {
   }
 
   // ==================== Agent Auth ====================
+
+  async agentMiniProgramLogin(code: string, phoneCode: string) {
+    return this.agentMiniProgramAuthService.login(code, phoneCode)
+  }
 
   async agentRegister(dto: AgentRegisterDto): Promise<AuthTokens & { user: any }> {
     const existing = await this.agentRepo.findOne({ where: { phone: dto.phone } })

@@ -22,7 +22,9 @@
     "typeorm": "typeorm-ts-node-commonjs",
     "migration:run": "typeorm-ts-node-commonjs migration:run -d src/data-source.ts",
     "migration:revert": "typeorm-ts-node-commonjs migration:revert -d src/data-source.ts",
-    "admin:create": "ts-node --transpile-only scripts/create-admin.ts"
+    "admin:create": "ts-node --transpile-only scripts/create-admin.ts",
+    "acceptance:financial": "ts-node --transpile-only scripts/local-financial-acceptance.ts",
+    "seed:staging-demo": "ts-node --transpile-only scripts/seed-staging-demo.ts"
   },
   "dependencies": {
     "@ai-auto/shared": "workspace:*",

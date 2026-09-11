@@ -213,6 +213,12 @@ describe('MerchantAgentBindingService', () => {
         id: 'binding-1',
         merchantId: 'merchant-123',
         bindingStatus: 'registered',
+        agentId: 'agent-existing',
+      })
+      agentRepo.findOne.mockResolvedValueOnce({
+        id: 'agent-existing',
+        auditStatus: AuditStatus.APPROVED,
+        status: true,
       })
 
       const result = await service.auditAgentBinding('merchant-123', 'binding-1', {
@@ -226,6 +232,92 @@ describe('MerchantAgentBindingService', () => {
         expect.objectContaining({
           bindingStatus: 'active',
           auditStatus: AuditStatus.APPROVED,
+        }),
+      )
+    })
+
+    it('运营审核未通过的达人不能被商户审核为合作中', async () => {
+      bindingRepo.findOne.mockResolvedValueOnce({
+        id: 'binding-1',
+        merchantId: 'merchant-123',
+        bindingStatus: 'registered',
+        agentId: 'creator-pending',
+      })
+      agentRepo.findOne.mockResolvedValueOnce({
+        id: 'creator-pending',
+        agentType: 'professional_creator',
+        auditStatus: AuditStatus.PENDING,
+        status: true,
+      })
+
+      await expect(
+        service.auditAgentBinding('merchant-123', 'binding-1', { result: 'approved' }),
+      ).rejects.toThrow('分享员尚未通过平台审核')
+      expect(bindingRepo.update).not.toHaveBeenCalled()
+    })
+
+    it('运营审核通过的达人可与已有商户完成关联并进入 active', async () => {
+      const merchantId = 'merchant-existing'
+      const creatorId = 'creator-professional'
+      bindingRepo.findOne
+        .mockResolvedValueOnce({
+          id: 'binding-for-creator',
+          merchantId,
+          bindingStatus: 'pending',
+        })
+        .mockResolvedValueOnce({
+          id: 'binding-for-creator',
+          merchantId,
+          agentId: creatorId,
+          bindingStatus: 'registered',
+        })
+      agentRepo.findOne
+        .mockResolvedValueOnce({
+          id: creatorId,
+          phone: '13800000001',
+          nickname: '本地探店达人',
+          agentType: 'professional_creator',
+          auditStatus: AuditStatus.APPROVED,
+          status: true,
+        })
+        .mockResolvedValueOnce({
+          id: creatorId,
+          agentType: 'professional_creator',
+          auditStatus: AuditStatus.APPROVED,
+          status: true,
+        })
+
+      const registration = await service.agentRegister({
+        phone: '13800000001',
+        inviteCode: 'CREATOR01',
+      })
+      const audited = await service.auditAgentBinding(merchantId, registration.bindingId, {
+        result: 'approved',
+        auditComment: '达人资质已核验',
+      })
+
+      expect(registration).toEqual({
+        agentId: creatorId,
+        bindingId: 'binding-for-creator',
+        status: 'registered',
+      })
+      expect(audited).toEqual({ status: 'active' })
+      expect(bindingRepo.update).toHaveBeenNthCalledWith(
+        1,
+        'binding-for-creator',
+        expect.objectContaining({
+          agentId: creatorId,
+          bindingStatus: 'registered',
+          auditStatus: AuditStatus.PENDING,
+        }),
+      )
+      expect(bindingRepo.update).toHaveBeenNthCalledWith(
+        2,
+        'binding-for-creator',
+        expect.objectContaining({
+          bindingStatus: 'active',
+          auditStatus: AuditStatus.APPROVED,
+          auditComment: '达人资质已核验',
         }),
       )
     })

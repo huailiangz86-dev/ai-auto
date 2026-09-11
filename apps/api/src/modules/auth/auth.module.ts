@@ -6,12 +6,14 @@ import { Module } from '@nestjs/common'
 import { PassportModule } from '@nestjs/passport'
 import { JwtModule } from '@nestjs/jwt'
 import { ConfigModule, ConfigService } from '@nestjs/config'
+import { HttpModule } from '@nestjs/axios'
 import { TypeOrmModule } from '@nestjs/typeorm'
 import { AuthController } from './auth.controller'
 import { AuthService } from './auth.service'
 import { TokenService, SmsService } from './services'
 import { JwtStrategy } from './strategies/jwt.strategy'
 import { JwtAuthGuard } from './guards/jwt-auth.guard'
+import { AgentMiniProgramAuthService } from './services/agent-mini-program-auth.service'
 import { RolesGuard } from './guards/roles.guard'
 import { Merchant } from '../merchant/entities/merchant.entity'
 import { SharingAgent } from '../agent/entities/sharing-agent.entity'
@@ -21,6 +23,7 @@ import { RedisModule } from '../redis/redis.module'
 @Module({
   imports: [
     PassportModule.register({ defaultStrategy: 'jwt' }),
+    HttpModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
@@ -33,7 +36,7 @@ import { RedisModule } from '../redis/redis.module'
     RedisModule,
   ],
   controllers: [AuthController],
-  providers: [AuthService, TokenService, SmsService, JwtStrategy, JwtAuthGuard, RolesGuard],
+  providers: [AuthService, TokenService, SmsService, AgentMiniProgramAuthService, JwtStrategy, JwtAuthGuard, RolesGuard],
   exports: [AuthService, TokenService, SmsService, JwtAuthGuard, RolesGuard],
 })
 export class AuthModule {}

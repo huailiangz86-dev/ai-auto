@@ -10,6 +10,7 @@ import {
   IsUUID,
   MaxLength,
   Min,
+  ValidateIf,
 } from 'class-validator'
 
 export class UpdateCreatorProfileDto {
@@ -34,6 +35,7 @@ export class CreateCreatorTaskAppealDto {
   @IsNotEmpty() @IsString() @MaxLength(2000) reason!: string
   @IsOptional() @IsObject() evidence?: Record<string, unknown>
 }
+export class CreateMerchantTaskAppealDto extends CreateCreatorTaskAppealDto {}
 export class VerifyCreatorTaskPayoutDto {
   @IsNumber() @Min(0) verifiedAmount!: number
   @IsOptional() @IsObject() evidence?: Record<string, unknown>
@@ -49,6 +51,24 @@ export class ListCreatorTaskAppealsDto {
   @IsOptional() @IsNumber() @Min(1) pageSize?: number = 20
 }
 export class ResolveCreatorTaskAppealDto {
-  @IsIn(['accepted', 'rejected']) decision!: 'accepted' | 'rejected'
+  @IsIn(['uphold', 'adjust_payout', 'reverse_settlement', 'accepted', 'rejected'])
+  decision!: 'uphold' | 'adjust_payout' | 'reverse_settlement' | 'accepted' | 'rejected'
+  @IsOptional() @IsNumber() @Min(0) adjustedAmount?: number
+  // Financial adjudications are intentionally a two-field confirmation. This
+  // prevents a stale or mistyped amount from becoming an irreversible ledger event.
+  @ValidateIf((dto: ResolveCreatorTaskAppealDto) =>
+    ['adjust_payout', 'reverse_settlement'].includes(dto.decision),
+  )
+  @IsNumber() @Min(0) confirmedAmount?: number
   @IsNotEmpty() @IsString() @MaxLength(2000) resolution!: string
+}
+export class ListRecoveryReceivablesDto {
+  @IsOptional() @IsUUID() creatorId?: string
+  @IsOptional() @IsIn(['all', 'watch', 'overdue', 'critical']) riskLevel?:
+    | 'all'
+    | 'watch'
+    | 'overdue'
+    | 'critical' = 'all'
+  @IsOptional() @IsNumber() @Min(1) page?: number = 1
+  @IsOptional() @IsNumber() @Min(1) pageSize?: number = 20
 }

@@ -17,6 +17,8 @@ import type {
   MysteryBoxResult,
   RewardProduct,
   CouponEvidence,
+  PersonalDataExport,
+  PersonalDataExportRequest,
 } from '../types/customer'
 
 interface PageResult<T> {
@@ -32,6 +34,13 @@ export const getNearbyCoupons = (params: {
   page?: number
   pageSize?: number
 }) => request<PageResult<NearbyStore>>({ url: '/customer/discover/nearby', method: 'GET', params })
+
+export const searchMerchants = (params: {
+  keyword: string
+  city?: string
+  page?: number
+  pageSize?: number
+}) => request<PageResult<NearbyStore>>({ url: '/customer/search', method: 'GET', params })
 
 export const getMyCoupons = (params: { status?: string; page?: number; pageSize?: number } = {}) =>
   request<PageResult<CustomerCoupon>>({ url: '/customer/coupons', method: 'GET', params })
@@ -59,6 +68,18 @@ export const updateCouponEvidenceConsent = (customerCouponId: string, trackingCo
 
 export const getProfile = () =>
   request<CustomerProfile>({ url: '/customer/profile', method: 'GET' })
+
+export const requestPersonalDataExport = () =>
+  request<PersonalDataExportRequest>({ url: '/customer/privacy/export-requests', method: 'POST' })
+
+export const downloadPersonalDataExport = (requestId: string) =>
+  request<PersonalDataExport>({
+    url: `/customer/privacy/export-requests/${requestId}/download`,
+    method: 'GET',
+  })
+
+export const scanClaimCoupon = (code: string) =>
+  request<CustomerCoupon>({ url: '/customer/coupons/scan-claim', method: 'POST', data: { code } })
 
 export const getCouponDetail = (couponId: string) =>
   request<CouponDetail>({ url: `/customer/coupons/${couponId}/detail`, method: 'GET' })

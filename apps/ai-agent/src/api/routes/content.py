@@ -6,7 +6,7 @@
 from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field
-from typing import Literal, Optionaldiff --git a/apps/ai-agent/src/api/routes/content.py b/apps/ai-agent/src/api/routes/content.py
+from typing import Literal, Optional
 from uuid import uuid4
 import asyncio
 import hashlib

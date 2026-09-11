@@ -8,6 +8,7 @@ import { TypeOrmModule } from '@nestjs/typeorm'
 import { Merchant } from './entities/merchant.entity'
 import { Store } from './entities/store.entity'
 import { Subscription } from './entities/subscription.entity'
+import { SubscriptionPaymentOrder } from './entities/subscription-payment-order.entity'
 import { AuditLog } from '../admin/entities/audit-log.entity'
 import { CommissionBudget } from './entities/commission-budget.entity'
 import { BudgetTransaction } from './entities/commission-budget.entity'
@@ -24,6 +25,7 @@ import { Redemption } from '../commission/entities/redemption.entity'
 
 import { MerchantController } from './merchant.controller'
 import { MerchantService } from './merchant.service'
+import { SubscriptionPaymentService } from './subscription-payment.service'
 import { MerchantWalletController } from './merchant-wallet.controller'
 import { MerchantWalletService } from './merchant-wallet.service'
 import { AICampaignController } from './ai-campaign.controller'
@@ -52,6 +54,7 @@ import { AuthModule } from '../auth/auth.module'
       Merchant,
       Store,
       Subscription,
+      SubscriptionPaymentOrder,
       AuditLog,
       CommissionBudget,
       BudgetTransaction,
@@ -84,6 +87,7 @@ import { AuthModule } from '../auth/auth.module'
   ],
   providers: [
     MerchantService,
+    SubscriptionPaymentService,
     MerchantWalletService,
     AICampaignService,
     MerchantAgentBindingService,

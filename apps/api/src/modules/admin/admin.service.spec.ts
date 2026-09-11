@@ -30,10 +30,14 @@ function createMockRepo() {
     andWhere: jest.fn().mockReturnThis(),
     innerJoin: jest.fn().mockReturnThis(),
     groupBy: jest.fn().mockReturnThis(),
+    orderBy: jest.fn().mockReturnThis(),
+    skip: jest.fn().mockReturnThis(),
+    take: jest.fn().mockReturnThis(),
     setParameter: jest.fn().mockReturnThis(),
     getCount: jest.fn().mockResolvedValue(0),
     getRawOne: jest.fn().mockResolvedValue({ count: '0', amount: '0' }),
     getRawMany: jest.fn().mockResolvedValue([]),
+    getManyAndCount: jest.fn().mockResolvedValue([[], 0]),
   }
   return {
     findOne: jest.fn(),
@@ -42,6 +46,7 @@ function createMockRepo() {
     save: jest.fn(),
     count: jest.fn().mockResolvedValue(0),
     createQueryBuilder: jest.fn().mockReturnValue(queryBuilder),
+    __queryBuilder: queryBuilder,
   }
 }
 
@@ -256,6 +261,19 @@ describe('AdminService', () => {
       expect(result.code).toBe(0)
       expect(result.message).toBe('审核通过')
     })
+
+    it('专业达人未绑定微信小程序身份时不能通过审核', async () => {
+      agentRepo.findOne.mockResolvedValueOnce({
+        id: 'agent-creator-without-wechat',
+        auditStatus: AuditStatus.PENDING,
+        agentType: 'professional_creator',
+        wechatOpenid: null,
+      })
+
+      await expect(service.approveAgent('agent-creator-without-wechat')).rejects.toThrow(
+        '专业达人须先通过微信小程序登录并绑定 OpenID',
+      )
+    })
   })
 
   describe('rejectAgent()', () => {
@@ -455,7 +473,7 @@ describe('AdminService', () => {
 
   describe('listPendingAgents()', () => {
     it('返回待审核分享员列表', async () => {
-      agentRepo.findAndCount.mockResolvedValueOnce([
+      agentRepo.__queryBuilder.getManyAndCount.mockResolvedValueOnce([
         [
           {
             id: 'agent-1',

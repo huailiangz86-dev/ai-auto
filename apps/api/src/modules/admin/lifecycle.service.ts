@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { DataSource, In } from 'typeorm'
 import { AuditActionType, UserRole } from '@ai-auto/shared'
 import { Merchant } from '../merchant/entities/merchant.entity'
+import { Store } from '../merchant/entities/store.entity'
 import { SharingAgent } from '../agent/entities/sharing-agent.entity'
 import { MerchantAgentBinding } from '../merchant/entities/merchant-agent-binding.entity'
 import { Campaign } from '../campaign/entities/campaign.entity'
@@ -11,6 +12,7 @@ import { Subscription } from '../merchant/entities/subscription.entity'
 import { CreatorTask, GrowthTask } from '../task/entities/growth-task.entity'
 import { SharingTask, SharingTaskAssignment } from '../task/entities/sharing-task.entity'
 import { AgentPlatformAccount } from '../agent/entities/agent-platform-account.entity'
+import { Content } from '../content/entities/content.entity'
 import { ContentPublication } from '../content/entities/content-publication.entity'
 import { Notification } from '../notification/entities/notification.entity'
 import { AuditLog } from './entities/audit-log.entity'
@@ -39,26 +41,56 @@ export class LifecycleService {
     if (query.keyword) qb.andWhere('(merchant.business_name ILIKE :keyword OR merchant.phone ILIKE :keyword)', { keyword: `%${query.keyword.trim()}%` })
     if (query.status === 'active') qb.andWhere('merchant.status = true')
     if (query.status === 'frozen') qb.andWhere('merchant.status = false')
+    if (query.auditStatus) qb.andWhere('merchant.audit_status = :auditStatus', { auditStatus: query.auditStatus })
     const [merchants, total] = await qb.orderBy('merchant.updatedAt', 'DESC').skip((page - 1) * pageSize).take(pageSize).getManyAndCount()
     return this.paginate(await Promise.all(merchants.map((merchant) => this.merchantListItem(merchant))), page, pageSize, total)
   }
 
   async getMerchantDetail(merchantId: string) {
     const merchant = await this.requireMerchant(merchantId)
-    const [summary, notes, relationships, audit] = await Promise.all([
+    const [summary, notes, relationships, audit, stores] = await Promise.all([
       this.merchantSummary(merchant),
       this.notes('merchant', merchantId),
       this.relationships({ merchantId }),
       this.audit('merchant', merchantId),
+      this.dataSource.getRepository(Store).find({
+        where: { merchantId },
+        order: { createdAt: 'ASC' },
+      }),
     ])
-    return { profile: this.merchantProfile(merchant), summary, notes, relationships, audit }
+    return {
+      profile: {
+        ...this.merchantProfile(merchant),
+        businessType: merchant.businessType,
+        businessLicenseNo: merchant.businessLicenseNo ?? null,
+        address: {
+          province: merchant.province ?? null,
+          city: merchant.city ?? null,
+          district: merchant.district ?? null,
+          detail: merchant.addressDetail ?? null,
+        },
+        stores: stores.map((store) => ({
+          id: store.id,
+          storeName: store.storeName,
+          province: store.province ?? null,
+          city: store.city ?? null,
+          district: store.district ?? null,
+          addressDetail: store.addressDetail ?? null,
+          status: store.status ? 'active' : 'inactive',
+        })),
+      },
+      summary,
+      notes,
+      relationships,
+      audit,
+    }
   }
 
   async listCreators(query: ListLifecycleSubjectsDto) {
     const page = Math.max(query.page || 1, 1)
     const pageSize = Math.min(Math.max(query.pageSize || 20, 1), 100)
     const qb = this.dataSource.getRepository(SharingAgent).createQueryBuilder('creator')
-    if (query.keyword) qb.andWhere('(creator.nickname ILIKE :keyword OR creator.phone ILIKE :keyword)', { keyword: `%${query.keyword.trim()}%` })
+    if (query.keyword) qb.andWhere('(creator.nickname ILIKE :keyword OR creator.phone ILIKE :keyword OR creator.wechat_openid ILIKE :keyword OR creator.wechat_unionid ILIKE :keyword)', { keyword: `%${query.keyword.trim()}%` })
     if (query.status === 'active') qb.andWhere('creator.status = true AND creator.blacklisted_at IS NULL')
     if (query.status === 'frozen') qb.andWhere('creator.status = false AND creator.blacklisted_at IS NULL')
     if (query.status === 'blacklisted') qb.andWhere('creator.blacklisted_at IS NOT NULL')
@@ -69,14 +101,30 @@ export class LifecycleService {
 
   async getCreatorDetail(creatorId: string) {
     const creator = await this.requireCreator(creatorId)
-    const [summary, accounts, notes, relationships, audit] = await Promise.all([
+    const [summary, accounts, contents, publications, notes, relationships, audit] = await Promise.all([
       this.creatorSummary(creator),
       this.dataSource.getRepository(AgentPlatformAccount).find({ where: { agentId: creatorId }, order: { boundAt: 'DESC' } }),
+      this.dataSource.getRepository(Content).find({ where: { agentId: creatorId }, order: { createdAt: 'DESC' }, take: 100 }),
+      this.dataSource.getRepository(ContentPublication).find({ where: { agentId: creatorId }, order: { publishedAt: 'DESC', createdAt: 'DESC' }, take: 200 }),
       this.notes('creator', creatorId),
       this.relationships({ creatorId }),
       this.audit('creator', creatorId),
     ])
-    return { profile: this.creatorProfile(creator), summary, accounts, notes, relationships, audit }
+    const publicationsByContent = new Map<string, ContentPublication[]>()
+    publications.forEach((publication) => {
+      const items = publicationsByContent.get(publication.contentId) ?? []
+      items.push(publication)
+      publicationsByContent.set(publication.contentId, items)
+    })
+    return {
+      profile: this.creatorProfile(creator),
+      summary,
+      accounts,
+      contents: contents.map((content) => this.creatorContentItem(content, publicationsByContent.get(content.id) ?? [])),
+      notes,
+      relationships,
+      audit,
+    }
   }
 
   async freezeMerchant(merchantId: string, dto: LifecycleReasonDto, actor: Actor) {
@@ -252,6 +300,8 @@ export class LifecycleService {
       },
       industryCategory: merchant.industryCategory,
       auditStatus: merchant.auditStatus,
+      auditComment: merchant.auditComment ?? null,
+      auditedAt: merchant.auditedAt ?? null,
       subscriptionStatus: merchant.subscriptionStatus,
       status: merchant.status ? 'active' : 'frozen',
       frozenAt: merchant.frozenAt ?? null,
@@ -263,7 +313,7 @@ export class LifecycleService {
   }
 
   private creatorProfile(creator: SharingAgent) {
-    return { id: creator.id, nickname: creator.nickname, phone: this.maskPhone(creator.phone), auditStatus: creator.auditStatus, agentType: creator.agentType ?? 'ordinary_user', realNameVerified: creator.realNameVerified, level: creator.level, growthScore: creator.creatorGrowthScore ?? 0, growthLevel: creator.creatorGrowthLevel ?? 1, categories: creator.creatorCategories ?? [], taskPreferences: creator.taskPreferences ?? {}, status: creator.blacklistedAt ? 'blacklisted' : creator.status ? 'active' : 'frozen', frozenAt: creator.frozenAt ?? null, frozenReason: creator.frozenReason ?? null, blacklistedAt: creator.blacklistedAt ?? null, blacklistReason: creator.blacklistReason ?? null, taskLimit: creator.creatorTaskLimit ?? null, tags: creator.operationTags ?? [], createdAt: creator.createdAt, updatedAt: creator.updatedAt }
+    return { id: creator.id, nickname: creator.nickname, phone: this.maskPhone(creator.phone), wechatOpenid: creator.wechatOpenid ?? null, wechatOpenidMasked: this.maskWechatId(creator.wechatOpenid), wechatUnionid: creator.wechatUnionid ?? null, auditStatus: creator.auditStatus, agentType: creator.agentType ?? 'ordinary_user', realNameVerified: creator.realNameVerified, level: creator.level, growthScore: creator.creatorGrowthScore ?? 0, growthLevel: creator.creatorGrowthLevel ?? 1, categories: creator.creatorCategories ?? [], taskPreferences: creator.taskPreferences ?? {}, status: creator.blacklistedAt ? 'blacklisted' : creator.status ? 'active' : 'frozen', frozenAt: creator.frozenAt ?? null, frozenReason: creator.frozenReason ?? null, blacklistedAt: creator.blacklistedAt ?? null, blacklistReason: creator.blacklistReason ?? null, taskLimit: creator.creatorTaskLimit ?? null, tags: creator.operationTags ?? [], createdAt: creator.createdAt, updatedAt: creator.updatedAt }
   }
 
   private async merchantSummary(merchant: Merchant) {
@@ -280,9 +330,10 @@ export class LifecycleService {
   }
 
   private async creatorSummary(creator: SharingAgent) {
-    const [creatorTasks, assignments, publications, commissions, bindings, alerts] = await Promise.all([
+    const [creatorTasks, assignments, contents, publications, commissions, bindings, alerts] = await Promise.all([
       this.dataSource.getRepository(CreatorTask).find({ where: { creatorId: creator.id }, select: ['id', 'status', 'channel'] }),
       this.dataSource.getRepository(SharingTaskAssignment).find({ where: { agentId: creator.id }, select: ['id', 'status', 'viewCount', 'claimCount', 'redemptionCount', 'earnedReward'] }),
+      this.dataSource.getRepository(Content).find({ where: { agentId: creator.id }, select: ['id', 'status', 'totalImpressions', 'totalClicks', 'totalClaims'] }),
       this.dataSource.getRepository(ContentPublication).find({ where: { agentId: creator.id }, select: ['id', 'status', 'impressions', 'clicks'] }),
       this.dataSource.getRepository(Commission).find({ where: { agentId: creator.id }, select: ['id', 'agentFinalPayout'] }),
       this.dataSource.getRepository(MerchantAgentBinding).find({ where: { agentId: creator.id }, select: ['id', 'bindingStatus', 'restrictedAt'] }),
@@ -290,7 +341,39 @@ export class LifecycleService {
     ])
     const taskTotal = creatorTasks.length + assignments.length
     const taskCompleted = creatorTasks.filter((item) => ['completed', 'settled'].includes(item.status)).length + assignments.filter((item) => item.status === 'completed').length
-    return { taskPerformance: { total: taskTotal, completed: taskCompleted, fulfillmentRate: taskTotal ? Number((taskCompleted / taskTotal).toFixed(4)) : 0, current: creatorTasks.filter((item) => !['completed', 'settled', 'cancelled', 'rejected', 'violation', 'expired'].includes(item.status)).length }, conversion: { views: this.sum(assignments, 'viewCount'), claims: this.sum(assignments, 'claimCount'), redemptions: this.sum(assignments, 'redemptionCount'), earnedReward: this.sum(assignments, 'earnedReward'), commissionEarned: this.sum(commissions, 'agentFinalPayout') }, publishing: { total: publications.length, published: publications.filter((item) => item.status === 'published').length, impressions: this.sum(publications, 'impressions'), clicks: this.sum(publications, 'clicks') }, relationships: { total: bindings.length, active: bindings.filter((item) => item.bindingStatus === 'active').length, restricted: bindings.filter((item) => Boolean(item.restrictedAt)).length }, risk: { pendingAlerts: alerts.length, criticalAlerts: alerts.filter((item) => item.severity === 'critical').length } }
+    return { taskPerformance: { total: taskTotal, completed: taskCompleted, fulfillmentRate: taskTotal ? Number((taskCompleted / taskTotal).toFixed(4)) : 0, current: creatorTasks.filter((item) => !['completed', 'settled', 'cancelled', 'rejected', 'violation', 'expired'].includes(item.status)).length }, conversion: { views: this.sum(assignments, 'viewCount'), claims: this.sum(assignments, 'claimCount') + this.sum(contents, 'totalClaims'), redemptions: this.sum(assignments, 'redemptionCount'), earnedReward: this.sum(assignments, 'earnedReward'), commissionEarned: this.sum(commissions, 'agentFinalPayout') }, publishing: { contentTotal: contents.length, total: publications.length, published: publications.filter((item) => item.status === 'published').length, impressions: Math.max(this.sum(contents, 'totalImpressions'), this.sum(publications, 'impressions')), clicks: Math.max(this.sum(contents, 'totalClicks'), this.sum(publications, 'clicks')) }, relationships: { total: bindings.length, active: bindings.filter((item) => item.bindingStatus === 'active').length, restricted: bindings.filter((item) => Boolean(item.restrictedAt)).length }, risk: { pendingAlerts: alerts.length, criticalAlerts: alerts.filter((item) => item.severity === 'critical').length } }
+  }
+
+  private creatorContentItem(content: Content, publications: ContentPublication[]) {
+    const publicationImpressions = this.sum(publications, 'impressions')
+    const publicationClicks = this.sum(publications, 'clicks')
+    return {
+      id: content.id,
+      contentType: content.contentType,
+      targetPlatform: content.targetPlatform ?? null,
+      status: content.status,
+      moderationStatus: content.moderationStatus,
+      trackingUrl: content.trackingUrl ?? null,
+      createdAt: content.createdAt,
+      performance: {
+        impressions: Math.max(Number(content.totalImpressions ?? 0), publicationImpressions),
+        clicks: Math.max(Number(content.totalClicks ?? 0), publicationClicks),
+        claims: Number(content.totalClaims ?? 0),
+      },
+      publications: publications.map((publication) => ({
+        id: publication.id,
+        platform: publication.platform,
+        status: publication.status,
+        platformPostId: publication.platformPostId ?? null,
+        platformPostUrl: publication.platformPostUrl ?? null,
+        publishedAt: publication.publishedAt ?? null,
+        impressions: Number(publication.impressions ?? 0),
+        clicks: Number(publication.clicks ?? 0),
+        comments: Number(publication.comments ?? 0),
+        shares: Number(publication.shares ?? 0),
+        likes: Number(publication.likes ?? 0),
+      })),
+    }
   }
 
   private async relationships(filter: { merchantId?: string; creatorId?: string }) {
@@ -326,6 +409,7 @@ export class LifecycleService {
   private normalizedTags(tags: string[]) { return [...new Set(tags.map((item) => item.trim()).filter(Boolean))].slice(0, 20) }
   private sum(rows: any[], field: string) { return rows.reduce((total, item) => total + Number(item[field] ?? 0), 0) }
   private maskPhone(phone: string) { return phone && phone.length >= 11 ? `${phone.slice(0, 3)}****${phone.slice(-4)}` : phone }
+  private maskWechatId(value?: string | null) { return !value ? null : value.length <= 10 ? value : `${value.slice(0, 6)}…${value.slice(-4)}` }
   private writeAudit(manager: any, actor: Actor, actionType: AuditActionType, actionDescription: string, targetType: string, targetId: string, targetName: string | null | undefined, metadata: Record<string, unknown>) { return manager.save(AuditLog, { actorType: 'admin', actorId: actor.id, actorName: actor.name ?? null, actionType, actionDescription, targetType, targetId, targetName: targetName ?? null, metadata, result: 'success' }) }
   private writeNotification(manager: any, recipientId: string, recipientRole: UserRole, type: string, title: string, body: string, targetType: string, targetId: string) { return manager.save(Notification, { recipientId, recipientRole, type, title, body, targetType, targetId }) }
 }

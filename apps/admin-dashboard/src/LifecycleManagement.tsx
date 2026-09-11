@@ -36,8 +36,15 @@ import {
 
 type Kind = 'merchants' | 'creators'
 type Row = MerchantLifecycle | CreatorLifecycle
+type MerchantAuditScope = 'approved' | 'rejected'
 
-export function LifecycleManagement({ kind }: { kind: Kind }) {
+export function LifecycleManagement({
+  kind,
+  merchantAuditScope,
+}: {
+  kind: Kind
+  merchantAuditScope?: MerchantAuditScope
+}) {
   const [keyword, setKeyword] = useState('')
   const [status, setStatus] = useState('')
   const [agentType, setAgentType] = useState('')
@@ -48,13 +55,13 @@ export function LifecycleManagement({ kind }: { kind: Kind }) {
   const [taskLimitSaving, setTaskLimitSaving] = useState(false)
   const queryClient = useQueryClient()
   const list = useQuery({
-    queryKey: ['lifecycle', kind, keyword, status, agentType],
+    queryKey: ['lifecycle', kind, merchantAuditScope, keyword, status, agentType],
     queryFn: async (): Promise<{
       items: Row[]
       pagination: { page: number; pageSize: number; total: number; totalPages: number }
     }> =>
       kind === 'merchants'
-        ? getLifecycleMerchants({ keyword, status })
+        ? getLifecycleMerchants({ keyword, status, auditStatus: merchantAuditScope })
         : getLifecycleCreators({ keyword, status, agentType }),
   })
   const detail = useQuery({
@@ -109,6 +116,7 @@ export function LifecycleManagement({ kind }: { kind: Kind }) {
     })
   const rows = list.data?.items ?? []
   const isMerchant = kind === 'merchants'
+  const canManageAccount = !isMerchant || merchantAuditScope === 'approved'
   const columns: ColumnsType<Row> = isMerchant
     ? [
         {
@@ -122,14 +130,14 @@ export function LifecycleManagement({ kind }: { kind: Kind }) {
           ),
         },
         {
-          title: '订阅 / 状态',
-          key: 'status',
-          render: (_, row) => (
-            <Space>
-              <Tag>{(row as MerchantLifecycle).subscriptionStatus}</Tag>
-              <StatusTag value={row.status} />
-            </Space>
-          ),
+          title: '订阅',
+          dataIndex: 'subscriptionStatus',
+          render: (value: string) => <Tag>{value}</Tag>,
+        },
+        {
+          title: '账号状态',
+          dataIndex: 'status',
+          render: (value: string) => <StatusTag value={value} />,
         },
         {
           title: 'Campaign',
@@ -165,9 +173,16 @@ export function LifecycleManagement({ kind }: { kind: Kind }) {
               <Typography.Text strong>
                 {(row as CreatorLifecycle).nickname || '未命名分享员'}
               </Typography.Text>
-              <Typography.Text type="secondary">{row.phone}</Typography.Text>
+              <Typography.Text type="secondary">
+                微信 { (row as CreatorLifecycle).wechatOpenidMasked || '未绑定' } · {row.phone}
+              </Typography.Text>
             </Space>
           ),
+        },
+        {
+          title: '微信小程序身份',
+          key: 'wechatIdentity',
+          render: (_, row) => (row as CreatorLifecycle).wechatOpenidMasked || <Tag color="orange">未绑定</Tag>,
         },
         {
           title: '身份类型',
@@ -280,7 +295,7 @@ export function LifecycleManagement({ kind }: { kind: Kind }) {
             </Button>
           </>
         )}
-        {row.status === 'active' ? (
+        {canManageAccount && row.status === 'active' ? (
           <Button
             danger
             type="link"
@@ -292,7 +307,7 @@ export function LifecycleManagement({ kind }: { kind: Kind }) {
           >
             冻结
           </Button>
-        ) : (
+        ) : canManageAccount ? (
           <Button
             type="link"
             onClick={() =>
@@ -303,7 +318,7 @@ export function LifecycleManagement({ kind }: { kind: Kind }) {
           >
             恢复
           </Button>
-        )}
+        ) : null}
       </Space>
     ),
   })
@@ -315,7 +330,7 @@ export function LifecycleManagement({ kind }: { kind: Kind }) {
           <Input
             value={keyword}
             onChange={(event) => setKeyword(event.target.value)}
-            placeholder={isMerchant ? '搜索商户名称或手机号' : '搜索分享员昵称或手机号'}
+            placeholder={isMerchant ? '搜索商户名称或手机号' : '搜索昵称、手机号、微信 OpenID / UnionID'}
             allowClear
             className="scope-input"
           />
@@ -332,13 +347,27 @@ export function LifecycleManagement({ kind }: { kind: Kind }) {
               ]}
             />
           )}
-          <Input
-            value={status}
-            onChange={(event) => setStatus(event.target.value)}
-            placeholder="状态：active / frozen / blacklisted"
-            allowClear
-            className="scope-input"
-          />
+          {canManageAccount && (
+            <Select
+              value={status || undefined}
+              onChange={(value) => setStatus(value ?? '')}
+              allowClear
+              placeholder="全部账号状态"
+              className="scope-input"
+              options={
+                isMerchant
+                  ? [
+                      { value: 'active', label: '正常' },
+                      { value: 'frozen', label: '已冻结' },
+                    ]
+                  : [
+                      { value: 'active', label: '正常' },
+                      { value: 'frozen', label: '已冻结' },
+                      { value: 'blacklisted', label: '黑名单' },
+                    ]
+              }
+            />
+          )}
           <Button onClick={() => void list.refetch()} loading={list.isFetching}>
             查询
           </Button>
@@ -482,10 +511,12 @@ function LifecycleDetailPanel({
         <Statistic key="conversion" title="核销" value={summary.conversion?.redemptions ?? 0} />,
         <Statistic
           key="publish"
-          title="发布"
+          title="已发布内容"
           value={summary.publishing?.published ?? 0}
           suffix={`/ ${summary.publishing?.total ?? 0}`}
         />,
+        <Statistic key="impressions" title="内容曝光" value={summary.publishing?.impressions ?? 0} />,
+        <Statistic key="clicks" title="内容点击" value={summary.publishing?.clicks ?? 0} />,
       ]
   return (
     <Space direction="vertical" size="middle" style={{ width: '100%' }}>
@@ -499,12 +530,34 @@ function LifecycleDetailPanel({
         <Descriptions.Item label="状态">
           <StatusTag value={profile.status} />
         </Descriptions.Item>
+        {isMerchant ? (
+          <>
+            <Descriptions.Item label="资质审核">
+              <AuditStatusTag value={(profile as MerchantLifecycle).auditStatus} />
+            </Descriptions.Item>
+            <Descriptions.Item label="审核意见">
+              {(profile as MerchantLifecycle).auditComment || '—'}
+            </Descriptions.Item>
+          </>
+        ) : null}
         {!isMerchant ? (
-          <Descriptions.Item label="任务额度">
-            {(profile as CreatorLifecycle).taskLimit === null
-              ? '不限'
-              : `${(profile as CreatorLifecycle).taskLimit} 个并发任务`}
-          </Descriptions.Item>
+          <>
+            <Descriptions.Item label="微信小程序 OpenID">
+              <Typography.Text copyable={{ text: (profile as CreatorLifecycle).wechatOpenid ?? '' }}>
+                {(profile as CreatorLifecycle).wechatOpenid || '未绑定'}
+              </Typography.Text>
+            </Descriptions.Item>
+            <Descriptions.Item label="微信 UnionID">
+              <Typography.Text copyable={{ text: (profile as CreatorLifecycle).wechatUnionid ?? '' }}>
+                {(profile as CreatorLifecycle).wechatUnionid || '微信未返回'}
+              </Typography.Text>
+            </Descriptions.Item>
+            <Descriptions.Item label="任务额度">
+              {(profile as CreatorLifecycle).taskLimit === null
+                ? '不限'
+                : `${(profile as CreatorLifecycle).taskLimit} 个并发任务`}
+            </Descriptions.Item>
+          </>
         ) : null}
         {isMerchant ? (
           <>
@@ -528,6 +581,53 @@ function LifecycleDetailPanel({
         <Button onClick={onNote}>记录跟进</Button>
         <Button onClick={onNotify}>发送通知</Button>
       </Space>
+      {!isMerchant ? (
+        <>
+          <Typography.Title level={5}>内容发布与获客</Typography.Title>
+          <Table
+            size="small"
+            pagination={{ pageSize: 5, hideOnSinglePage: true }}
+            rowKey="id"
+            dataSource={detail.contents ?? []}
+            locale={{ emptyText: '暂无内容产出；达人发布后将在此沉淀内容与获客数据' }}
+            columns={[
+              {
+                title: '内容',
+                key: 'content',
+                render: (_, item) => (
+                  <Space direction="vertical" size={0}>
+                    <span>{item.contentType}</span>
+                    <Typography.Text type="secondary">{item.targetPlatform || '未指定平台'} · {item.status}</Typography.Text>
+                  </Space>
+                ),
+              },
+              {
+                title: '发布',
+                key: 'publication',
+                render: (_, item) => item.publications.length
+                  ? item.publications.map((publication) => (
+                    <div key={publication.id}>
+                      {publication.platform} · {publication.status}
+                      {publication.platformPostUrl ? <a href={publication.platformPostUrl} target="_blank" rel="noreferrer"> 查看</a> : null}
+                    </div>
+                  ))
+                  : '未发布',
+              },
+              {
+                title: '获客表现',
+                key: 'performance',
+                render: (_, item) => (
+                  <Space direction="vertical" size={0}>
+                    <span>曝光 {item.performance.impressions} · 点击 {item.performance.clicks}</span>
+                    <Typography.Text type="secondary">领券 {item.performance.claims}</Typography.Text>
+                  </Space>
+                ),
+              },
+              { title: '生成时间', dataIndex: 'createdAt', render: formatDate },
+            ]}
+          />
+        </>
+      ) : null}
       <Typography.Title level={5}>合作关系与质量</Typography.Title>
       <Table
         size="small"
@@ -577,6 +677,21 @@ function StatusTag({ value }: { value: string }) {
             : value}
     </Tag>
   )
+}
+function AuditStatusTag({ value }: { value: string }) {
+  const labels: Record<string, string> = {
+    pending: '待审核',
+    approved: '已通过',
+    rejected: '未通过',
+    need_info: '待补充资料',
+  }
+  const colors: Record<string, string> = {
+    pending: 'gold',
+    approved: 'green',
+    rejected: 'red',
+    need_info: 'orange',
+  }
+  return <Tag color={colors[value]}>{labels[value] ?? value}</Tag>
 }
 function formatDate(value: string) {
   return value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '—'

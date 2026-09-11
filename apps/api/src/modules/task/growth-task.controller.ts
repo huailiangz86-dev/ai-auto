@@ -106,6 +106,14 @@ export class CreatorTaskController {
   accept(@CurrentUser() user: CurrentUserPayload, @Param('creatorTaskId') id: string) {
     return this.service.moveCreatorTaskForCreator(user.agentId!, id, 'accepted')
   }
+  @Post(':creatorTaskId/decline')
+  decline(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('creatorTaskId') id: string,
+    @Body() dto: TaskReasonDto,
+  ) {
+    return this.service.moveCreatorTaskForCreator(user.agentId!, id, 'declined', undefined, dto.reason)
+  }
   @Post(':creatorTaskId/start')
   start(@CurrentUser() user: CurrentUserPayload, @Param('creatorTaskId') id: string) {
     return this.service.moveCreatorTaskForCreator(user.agentId!, id, 'creating')

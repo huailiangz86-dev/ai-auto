@@ -1,8 +1,11 @@
 <template>
   <view class="page-padding safe-bottom">
-    <view class="search" @tap="showSearchTip"
-      ><text>🔍</text><text>搜索商家、品类或关键词</text></view
-    >
+    <view class="top-actions">
+      <view class="search" @tap="openSearch">
+        <text>🔍</text><text>搜索商家、品类或关键词</text>
+      </view>
+      <button class="scan" @tap="scanClaim">扫码领券</button>
+    </view>
     <scroll-view class="categories" scroll-x
       ><text
         v-for="item in categories"
@@ -41,6 +44,7 @@ import { computed, ref } from 'vue'
 import { onLoad, onPullDownRefresh, onReachBottom } from '@dcloudio/uni-app'
 import MerchantCard from '../../components/merchant-card/index.vue'
 import { useCouponStore } from '../../stores/coupon'
+import { scanClaimCoupon } from '../../api/customer'
 import { getCurrentLocation } from '../../utils/location'
 import type { CustomerCoupon, NearbyStore } from '../../types/customer'
 
@@ -71,8 +75,25 @@ function selectCategory(value: string) {
   category.value = value
   void loadNearby(true)
 }
-function showSearchTip() {
-  uni.showToast({ title: '搜索功能即将开放', icon: 'none' })
+function openSearch() {
+  uni.navigateTo({ url: `/pages/search/index?city=${encodeURIComponent(location.value.city ?? '')}` })
+}
+
+function scanClaim() {
+  uni.scanCode({
+    onlyFromCamera: false,
+    success: async ({ result }) => {
+      if (!result) return
+      try {
+        const claimed = await scanClaimCoupon(result)
+        store.coupons = [claimed, ...store.coupons]
+        uni.showToast({ title: '领取成功', icon: 'success' })
+        uni.navigateTo({ url: `/pages/redemption/index?id=${claimed.customerCouponId}` })
+      } catch (error) {
+        uni.showToast({ title: error instanceof Error ? error.message : '未识别到有效优惠券', icon: 'none' })
+      }
+    },
+  })
 }
 
 function handleClaim(couponId: string) {
@@ -104,7 +125,9 @@ onReachBottom(() => {
 </script>
 
 <style scoped lang="scss">
+.top-actions { display: flex; gap: 16rpx; align-items: center; }
 .search {
+  flex: 1;
   display: flex;
   gap: 12rpx;
   align-items: center;
@@ -114,6 +137,7 @@ onReachBottom(() => {
   background: #fff;
   border-radius: 40rpx;
 }
+.scan { flex: none; margin: 0; padding: 0 24rpx; color: #07c160; font-size: 24rpx; line-height: 76rpx; background: #e8f8ee; border-radius: 38rpx; }
 .categories {
   margin: 24rpx 0;
   white-space: nowrap;

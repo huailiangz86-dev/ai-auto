@@ -85,6 +85,10 @@ export class ListPendingMerchantsDto {
 
 export class ListPendingAgentsDto {
   @IsOptional()
+  @IsString()
+  keyword?: string
+
+  @IsOptional()
   @IsNumber()
   @Min(1)
   page?: number = 1

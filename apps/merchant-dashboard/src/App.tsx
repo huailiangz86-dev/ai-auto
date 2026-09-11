@@ -3,6 +3,7 @@ import {
   BankOutlined,
   BellOutlined,
   BulbOutlined,
+  FileProtectOutlined,
   LogoutOutlined,
   RocketOutlined,
   ShopOutlined,
@@ -16,6 +17,8 @@ import {
   Button,
   Card,
   Col,
+  Descriptions,
+  Drawer,
   Form,
   Input,
   Layout,
@@ -131,6 +134,20 @@ function Auth({ onAuthenticated }: { onAuthenticated: () => void }) {
 
 function Portal({ onLogout }: { onLogout: () => void }) {
   const [page, setPage] = useState('overview')
+  const [appealDetailId, setAppealDetailId] = useState<string | null>(null)
+  const openNotificationTarget = (item: any) => {
+    if (item.targetType === 'creator_task_appeal' && item.targetId) {
+      setAppealDetailId(item.targetId)
+      setPage('appeals')
+      return
+    }
+    if (item.targetType === 'creator_task' || item.targetType === 'creator_task_payout') {
+      setPage('appeals')
+      message.info('已打开申诉中心，可查看该任务关联的结算与申诉记录。')
+      return
+    }
+    message.info('该通知暂无可查看的业务详情。')
+  }
   const items = [
     { key: 'overview', icon: <AppstoreOutlined />, label: '经营概览' },
     { key: 'growth-plans', icon: <RocketOutlined />, label: 'AI 增长计划' },
@@ -145,6 +162,7 @@ function Portal({ onLogout }: { onLogout: () => void }) {
     { key: 'agents', icon: <TeamOutlined />, label: '分享员管理' },
     { key: 'stores', icon: <ShopOutlined />, label: '门店管理' },
     { key: 'wallet', icon: <WalletOutlined />, label: '佣金预算' },
+    { key: 'appeals', icon: <FileProtectOutlined />, label: '申诉中心' },
     { key: 'notifications', icon: <BellOutlined />, label: '消息通知' },
     { key: 'roi-report', icon: <WalletOutlined />, label: 'ROI 与效果报告' },
   ]
@@ -177,7 +195,8 @@ function Portal({ onLogout }: { onLogout: () => void }) {
           {page === 'agents' && <Agents />}
           {page === 'stores' && <Stores />}
           {page === 'wallet' && <Wallet />}
-          {page === 'notifications' && <Notifications />}
+          {page === 'appeals' && <Appeals initialAppealId={appealDetailId} onDetailOpened={() => setAppealDetailId(null)} />}
+          {page === 'notifications' && <Notifications onOpenTarget={openNotificationTarget} />}
         </Content>
       </Layout>
     </Layout>
@@ -897,7 +916,263 @@ function Wallet() {
   )
 }
 
-function Notifications() {
+type AppealableCreatorTask = {
+  creatorTaskId: string
+  brief: string
+  channel: string
+  contentType: string
+  completedAt: string
+  payout: { status: string; verifiedAmount: number | null; settledAt?: string | null }
+  taskAppealDeadlineAt: string
+  payoutAppealDeadlineAt: string | null
+  taskAppealable: boolean
+  payoutAppealable: boolean
+}
+
+const decisionLabel = (value?: string | null) => ({
+  uphold: '维持原结算',
+  adjust_payout: '调整报酬',
+  reverse_settlement: '撤销/追回结算',
+  accepted: '申诉受理',
+  rejected: '申诉驳回',
+}[value ?? ''] ?? '待运营裁决')
+
+function Appeals({ initialAppealId, onDetailOpened }: { initialAppealId: string | null; onDetailOpened: () => void }) {
+  const [form] = Form.useForm<{ reason: string }>()
+  const [selected, setSelected] = useState<{
+    task: AppealableCreatorTask
+    target: 'task' | 'payout'
+  } | null>(null)
+  const appealableTasks = useQuery({
+    queryKey: ['merchant-appealable-creator-tasks'],
+    queryFn: () => api<{ items: AppealableCreatorTask[] }>('/merchant/creator-tasks/appealable'),
+  })
+  const appeals = useQuery({
+    queryKey: ['merchant-task-appeals'],
+    queryFn: () => api<{ items: any[] }>('/merchant/appeals'),
+  })
+  const [detailAppealId, setDetailAppealId] = useState<string | null>(null)
+  useEffect(() => {
+    if (initialAppealId) {
+      setDetailAppealId(initialAppealId)
+      onDetailOpened()
+    }
+  }, [initialAppealId, onDetailOpened])
+  const appealDetail = useQuery({
+    queryKey: ['merchant-task-appeal-detail', detailAppealId],
+    queryFn: () => api<any>(`/merchant/appeals/${detailAppealId}`),
+    enabled: Boolean(detailAppealId),
+  })
+  const submit = async ({ reason }: { reason: string }) => {
+    if (!selected) return
+    try {
+      await api(`/merchant/creator-tasks/${selected.task.creatorTaskId}/appeals`, {
+        method: 'POST',
+        body: JSON.stringify({ target: selected.target, reason }),
+      })
+      message.success('申诉已提交，平台运营将进行处理')
+      form.resetFields()
+      setSelected(null)
+      appealableTasks.refetch()
+      appeals.refetch()
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '提交申诉失败')
+    }
+  }
+  return (
+    <>
+      <div className="heading">
+        <div>
+          <Typography.Title level={2}>申诉中心</Typography.Title>
+          <Typography.Text type="secondary">
+            商户与创作者均可在任务完成或报酬结算完成后 30 个自然日内申诉。
+          </Typography.Text>
+        </div>
+      </div>
+      <Card title="可申诉的任务与结算">
+        <Table
+          rowKey="creatorTaskId"
+          loading={appealableTasks.isLoading}
+          dataSource={appealableTasks.data?.items ?? []}
+          columns={[
+            { title: '任务内容', dataIndex: 'brief', ellipsis: true },
+            {
+              title: '渠道 / 内容',
+              render: (_, row: AppealableCreatorTask) => `${row.channel} / ${row.contentType}`,
+            },
+            {
+              title: '结算金额',
+              render: (_, row: AppealableCreatorTask) =>
+                row.payout.verifiedAmount == null ? '—' : money(row.payout.verifiedAmount),
+            },
+            {
+              title: '申诉截止时间',
+              render: (_, row: AppealableCreatorTask) => {
+                const dates = [
+                  row.taskAppealable
+                    ? `任务：${new Date(row.taskAppealDeadlineAt).toLocaleString('zh-CN')}`
+                    : null,
+                  row.payoutAppealable && row.payoutAppealDeadlineAt
+                    ? `结算：${new Date(row.payoutAppealDeadlineAt).toLocaleString('zh-CN')}`
+                    : null,
+                ].filter(Boolean)
+                return dates.join('；') || '已过期'
+              },
+            },
+            {
+              title: '操作',
+              render: (_, row: AppealableCreatorTask) => (
+                <Space>
+                  {row.taskAppealable && (
+                    <Button type="link" onClick={() => setSelected({ task: row, target: 'task' })}>
+                      申诉任务履约
+                    </Button>
+                  )}
+                  {row.payoutAppealable && (
+                    <Button
+                      type="link"
+                      onClick={() => setSelected({ task: row, target: 'payout' })}
+                    >
+                      申诉结算
+                    </Button>
+                  )}
+                </Space>
+              ),
+            },
+          ]}
+          locale={{ emptyText: '当前没有处于 30 个自然日申诉期内的任务或结算。' }}
+        />
+      </Card>
+      <Card title="申诉记录" className="section">
+        <Table
+          rowKey="id"
+          loading={appeals.isLoading}
+          dataSource={appeals.data?.items ?? []}
+          columns={[
+            {
+              title: '申诉方',
+              dataIndex: 'appellantType',
+              render: (value) => (value === 'merchant' ? '商户' : '创作者'),
+            },
+            {
+              title: '类型',
+              dataIndex: 'target',
+              render: (value) => (value === 'payout' ? '结算' : '任务履约'),
+            },
+            { title: '申诉原因', dataIndex: 'reason', ellipsis: true },
+            {
+              title: '状态',
+              dataIndex: 'status',
+              render: (value) => (
+                <Tag
+                  color={
+                    value === 'open' ? 'processing' : value === 'accepted' ? 'success' : 'default'
+                  }
+                >
+                  {value}
+                </Tag>
+              ),
+            },
+            {
+              title: '提交时间',
+              dataIndex: 'createdAt',
+              render: (value) => new Date(value).toLocaleString('zh-CN'),
+            },
+            {
+              title: '处理说明',
+              dataIndex: 'resolution',
+              render: (value) => value || '待运营处理',
+            },
+            {
+              title: '操作',
+              render: (_, row: any) => <Button type="link" onClick={() => setDetailAppealId(row.appealId)}>查看详情</Button>,
+            },
+          ]}
+          locale={{ emptyText: '暂无申诉记录。' }}
+        />
+      </Card>
+      <Drawer title="申诉裁决与账务详情" width={640} open={Boolean(detailAppealId)} onClose={() => setDetailAppealId(null)}>
+        {appealDetail.isLoading ? '加载中…' : appealDetail.data ? <AppealDetailCard appeal={appealDetail.data} /> : <Alert type="error" message="无法加载申诉详情" />}
+      </Drawer>
+      <Modal
+        title={selected?.target === 'payout' ? '申诉任务结算' : '申诉任务履约'}
+        open={Boolean(selected)}
+        onCancel={() => {
+          form.resetFields()
+          setSelected(null)
+        }}
+        footer={null}
+        destroyOnClose
+      >
+        <Alert
+          className="section"
+          type="info"
+          showIcon
+          message="提交后将通知创作者，并进入平台运营处理队列。"
+        />
+        <Form form={form} layout="vertical" onFinish={submit}>
+          <Form.Item
+            name="reason"
+            label="申诉原因"
+            rules={[{ required: true, max: 2000, message: '请填写不超过 2000 字的申诉原因' }]}
+          >
+            <Input.TextArea rows={5} placeholder="请说明争议事实、诉求和可补充的证据。" />
+          </Form.Item>
+          <Button type="primary" htmlType="submit" block>
+            提交申诉
+          </Button>
+        </Form>
+      </Modal>
+    </>
+  )
+}
+
+function AppealDetailCard({ appeal }: { appeal: any }) {
+  const recovery = appeal.recovery ?? {
+    amount: Math.max(0, Number(appeal.amountBefore ?? 0) - Number(appeal.amountAfter ?? 0)),
+    recovered: 0,
+    remaining: Math.max(0, Number(appeal.amountBefore ?? 0) - Number(appeal.amountAfter ?? 0)),
+    status: Math.max(0, Number(appeal.amountBefore ?? 0) - Number(appeal.amountAfter ?? 0)) ? 'recovering' : 'not_applicable',
+  }
+  const payout = appeal.payout
+  const payoutStatus = payout?.status === 'reversed'
+    ? Number(recovery.remaining) > 0 ? '已撤销；后续结算仍在自动追回' : '已撤销；追回已完成'
+    : payout?.status === 'settled'
+      ? `已到账 ${money(payout.settledAmount)}${Number(payout.recoveryOffsetAmount ?? 0) > 0 ? `（已自动抵扣 ${money(payout.recoveryOffsetAmount)}）` : ''}`
+      : payout?.status ? `结算状态：${payout.status}` : '暂无关联结算'
+  return <Space direction="vertical" size="large" style={{ width: '100%' }}>
+    <Descriptions bordered size="small" column={1} items={[
+      { key: 'decision', label: '裁决结论', children: <Tag color={appeal.adjudicationDecision ? 'processing' : 'default'}>{decisionLabel(appeal.adjudicationDecision)}</Tag> },
+      { key: 'amount', label: '金额变化', children: appeal.amountBefore == null ? '未产生金额调整' : `${money(appeal.amountBefore)} → ${money(appeal.amountAfter)}` },
+      { key: 'recovery', label: '应追回', children: Number(recovery.amount) ? money(recovery.amount) : '无' },
+      { key: 'recovered', label: '已追回', children: money(recovery.recovered) },
+      { key: 'remaining', label: '剩余待追回', children: money(recovery.remaining) },
+      { key: 'recoveryStatus', label: '追回状态', children: recovery.status === 'completed' ? <Tag color="success">已完成</Tag> : recovery.status === 'recovering' ? <Tag color="processing">追回中</Tag> : '不适用' },
+      { key: 'settlement', label: '到账/追回状态', children: payoutStatus },
+      { key: 'resolution', label: '处理说明', children: appeal.resolution || '待运营处理' },
+      { key: 'resolvedAt', label: '处理时间', children: appeal.resolvedAt ? new Date(appeal.resolvedAt).toLocaleString('zh-CN') : '待处理' },
+      { key: 'evidence', label: '申诉证据', children: Object.keys(appeal.evidence ?? {}).length ? <Typography.Text code>{JSON.stringify(appeal.evidence)}</Typography.Text> : '未提交附件或结构化证据' },
+    ]} />
+    <Card size="small" title="后续结算抵扣明细">
+      <Table size="small" rowKey="id" pagination={false} dataSource={(appeal.financialLedgerEntries ?? []).filter((item: any) => item.entryType === 'recovery_auto_offset')} columns={[
+        { title: '后续结算流水', render: (_, item: any) => item.metadata?.settlementPayoutId ?? '—', ellipsis: true },
+        { title: '本次追回', dataIndex: 'amount', render: (value) => money(Math.abs(Number(value))) },
+        { title: '追回后剩余', render: (_, item: any) => money(item.metadata?.remainingRecoveryAmount) },
+        { title: '发生时间', dataIndex: 'occurredAt', render: (value) => new Date(value).toLocaleString('zh-CN') },
+      ]} locale={{ emptyText: '暂无后续结算抵扣记录' }} />
+    </Card>
+    <Card size="small" title="关联账务流水">
+      <Table size="small" rowKey="id" pagination={false} dataSource={appeal.financialLedgerEntries ?? []} columns={[
+        { title: '流水 ID', dataIndex: 'id', ellipsis: true },
+        { title: '类型', dataIndex: 'entryType' },
+        { title: '金额', dataIndex: 'amount', render: money },
+        { title: '发生时间', dataIndex: 'occurredAt', render: (value) => new Date(value).toLocaleString('zh-CN') },
+      ]} locale={{ emptyText: (appeal.financialLedgerEntryIds ?? []).length ? `流水 ${appeal.financialLedgerEntryIds.join('、')} 暂不可用` : '本次裁决未产生账务流水' }} />
+    </Card>
+  </Space>
+}
+
+function Notifications({ onOpenTarget }: { onOpenTarget: (item: any) => void }) {
   const notifications = useQuery({
     queryKey: ['merchant-notifications'],
     queryFn: () => api<any>('/notifications?page=1&pageSize=50'),
@@ -941,7 +1216,11 @@ function Notifications() {
                   <Button type="link" onClick={() => markRead(item.id)}>
                     标记已读
                   </Button>
-                ),
+              ),
+            },
+            {
+              title: '操作',
+              render: (_, item: any) => item.targetType && item.targetId ? <Button type="link" onClick={() => onOpenTarget(item)}>查看详情</Button> : '—',
             },
           ]}
           locale={{ emptyText: '暂无通知' }}

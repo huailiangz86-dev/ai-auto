@@ -85,4 +85,17 @@ Delivered an append-only financial ledger, idempotent operations entry API, Camp
 
 Delivered v2 Creator profile/governance fields, reviewed five-dimension Growth Score with L1–L5 mapping, auditable score decisions and Creator blacklist controls. Existing verification approval and suspension flows remain the compatibility path.
 
-**Next:** OPS-V2-003 — Growth Task / Creator Task state machine (compensation lock, Campaign Credits and review/risk-hold transitions).
+**Implemented in code; pending real-environment acceptance (2026-09-07):**
+
+- **OPS-V2-003 / V2-004 / V2-005:** Growth Task and Creator Task state machine, compensation lock, Campaign Credits, review/risk-hold/appeal queues, and pilot/weekly evidence measurement are implemented.
+- **V2-2 through V2-5:** Merchant Growth Plan/funding/ROI, Creator task workspace and payout settlement, consumer evidence-consent flow, matching, incrementality and repeat-Campaign instrumentation are implemented in the API and client applications.
+- **OPS recovery operations:** Migration `1790300000000` attributes every outstanding receivable to its adjudication. The operations console shows recovery progress, linked auto-offset ledger entries, last offset time, and 7/30/60-day no-offset tiers. `GET /admin/creator-tasks/recovery-reconciliation` verifies both wallet receivables against outstanding adjudications and each later-payout offset against its ledger rows. It only recommends manual handling; withdrawal suspension, negotiation, and write-off remain disabled until their approved business/compliance rules are configured.
+
+### Recovery operations acceptance
+
+1. Apply `pnpm --filter @ai-auto/api migration:run` in staging, including `1790300000000-AddRecoveryProgressToAppeals`.
+2. With the API running, execute `pnpm --filter @ai-auto/api acceptance:financial`. The probe retains its append-only fixtures and covers: normal settlement, adjusted settlement, a withdrawn reversal that creates a receivable, and a later settlement that is automatically offset.
+3. Confirm the reconciliation endpoint returns `receivableMatches: true` and `settlementOffsets.matches: true`; investigate and retain evidence for every mismatch before release.
+4. Confirm the operations console's 7/30/60-day queue is read-only with respect to withdrawal suspension and write-off until the relevant policy, approval roles, and audit requirements are signed off.
+
+**Next delivery gate:** Apply migrations to an empty PostgreSQL instance, configure real provider credentials and public callback URLs, then run the four-surface pilot acceptance flow. Completion requires successful payment callback verification, a real Douyin publish, and evidence-chain reconciliation; local type checks and unit tests alone are not release acceptance.

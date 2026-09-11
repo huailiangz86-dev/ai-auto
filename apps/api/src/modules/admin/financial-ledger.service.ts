@@ -248,7 +248,7 @@ export class FinancialLedgerService {
     return rows
       .filter(
         (row) =>
-          ['verified', 'settled', 'risk_hold'].includes(row.status) &&
+          ['verified', 'settled', 'risk_hold', 'reversed'].includes(row.status) &&
           (!input.campaignId || row.campaignId === input.campaignId) &&
           !this.hasCogsLedgerForCreatorTaskPayout(row, ledgerEntries),
       )
@@ -310,6 +310,7 @@ export class FinancialLedgerService {
     return ledgerEntries.some(
       (entry) =>
         entry.classification === 'cogs' &&
+        !['appeal_payout_adjustment', 'appeal_payout_reversal'].includes(entry.entryType) &&
         (entry.sourceReference === payout.id ||
           entry.creatorTaskId === payout.creatorTaskId ||
           entry.metadata?.payoutId === payout.id),

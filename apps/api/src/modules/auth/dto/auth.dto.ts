@@ -79,6 +79,19 @@ export class AgentLoginDto {
   password!: string
 }
 
+/**
+ * 达人小程序登录。手机号授权码使首次登记具备可联系的实名手机号，code 用于换取微信身份。
+ */
+export class AgentMiniProgramLoginDto {
+  @ApiProperty({ description: 'wx.login 返回的一次性 code' })
+  @IsString()
+  code!: string
+
+  @ApiProperty({ description: 'getPhoneNumber 返回的手机号授权 code' })
+  @IsString()
+  phoneCode!: string
+}
+
 // ---------- SMS Auth ----------
 
 export class SendSmsCodeDto {

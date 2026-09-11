@@ -66,18 +66,14 @@ export class MerchantService {
       })
     }
 
-    // 2. 验证短信验证码（简化：直接通过，生产需调用 SMS 服务）
+    // 2. 先校验格式，再通过短信服务验证一次性验证码。
+    if (!/^\d{6}$/.test(dto.verificationCode ?? '')) {
+      throw new BadRequestException({ code: 1006, message: '验证码格式不正确' })
+    }
+
     const verified = await this.smsService.verifyCode(dto.phone, dto.verificationCode, 'login')
     if (!verified) {
       throw new BadRequestException({ code: 1006, message: '验证码错误或已过期' })
-    }
-
-    // TODO: 生产环境接入真实 SMS 服务
-    if (!dto.verificationCode || dto.verificationCode.length < 4) {
-      throw new BadRequestException({
-        code: 1006,
-        message: '验证码不正确',
-      })
     }
 
     // 3. 事务：创建商户 + 首个门店

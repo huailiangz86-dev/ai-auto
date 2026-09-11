@@ -15,6 +15,7 @@ import { AgentLevel, AuditStatus } from '@ai-auto/shared'
 @Index('idx_agent_valid_customers', ['validCustomerCount'])
 @Index('idx_agent_creator_governance', ['status', 'blacklistedAt', 'creatorGrowthLevel'])
 @Index('idx_agent_type', ['agentType'])
+@Index('idx_agent_wechat_openid_unique', ['wechatOpenid'], { unique: true, where: '"wechat_openid" IS NOT NULL' })
 export class SharingAgent extends BaseEntity {
   // ---- Basic Info ----
   @Column({ type: 'varchar', length: 20 })
@@ -25,6 +26,14 @@ export class SharingAgent extends BaseEntity {
 
   @Column({ type: 'varchar', length: 255, nullable: true })
   avatar?: string | null
+
+  // 小程序身份：运营审核、归因和检索均以微信侧返回的稳定标识为准，昵称仅作展示。
+  // OpenID 在本小程序内唯一；UnionID（若微信返回）可用于跨应用核验。
+  @Column({ name: 'wechat_openid', type: 'varchar', length: 128, nullable: true })
+  wechatOpenid?: string | null
+
+  @Column({ name: 'wechat_unionid', type: 'varchar', length: 128, nullable: true })
+  wechatUnionid?: string | null
 
   @Column({ type: 'varchar', length: 255, select: false })
   @Exclude()

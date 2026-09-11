@@ -52,6 +52,7 @@ export interface AppConfig {
     alipayPrivateKey: string
     alipayPublicKey: string
     alipayNotifyUrl: string
+    alipayReturnUrl: string
     wechatpayAppId: string
     wechatpaySerialNo: string
     wechatpayPrivateKey: string
@@ -140,22 +141,25 @@ export default (): AppConfig => {
     },
     payment: {
       alipayAppId: process.env.ALIPAY_APP_ID || fileConfig.payment?.alipayAppId || '',
-      wechatpayMchId: process.env.WECHATPAY_MCH_ID || fileConfig.payment?.wechatpayMchId || '',
+      wechatpayMchId:
+        process.env.WECHATPAY_MCH_ID || process.env.WECHAT_PAY_MCH_ID || fileConfig.payment?.wechatpayMchId || '',
       alipayPrivateKey:
         process.env.ALIPAY_PRIVATE_KEY || fileConfig.payment?.alipayPrivateKey || '',
       alipayPublicKey: process.env.ALIPAY_PUBLIC_KEY || fileConfig.payment?.alipayPublicKey || '',
       alipayNotifyUrl: process.env.ALIPAY_NOTIFY_URL || fileConfig.payment?.alipayNotifyUrl || '',
-      wechatpayAppId: process.env.WECHATPAY_APP_ID || fileConfig.payment?.wechatpayAppId || '',
+      alipayReturnUrl: process.env.ALIPAY_RETURN_URL || fileConfig.payment?.alipayReturnUrl || '',
+      wechatpayAppId:
+        process.env.WECHATPAY_APP_ID || process.env.WECHAT_PAY_APP_ID || fileConfig.payment?.wechatpayAppId || '',
       wechatpaySerialNo:
-        process.env.WECHATPAY_SERIAL_NO || fileConfig.payment?.wechatpaySerialNo || '',
+        process.env.WECHATPAY_SERIAL_NO || process.env.WECHAT_PAY_CERT_SERIAL_NO || fileConfig.payment?.wechatpaySerialNo || '',
       wechatpayPrivateKey:
-        process.env.WECHATPAY_PRIVATE_KEY || fileConfig.payment?.wechatpayPrivateKey || '',
+        process.env.WECHATPAY_PRIVATE_KEY || process.env.WECHAT_PAY_PRIVATE_KEY || fileConfig.payment?.wechatpayPrivateKey || '',
       wechatpayApiV3Key:
-        process.env.WECHATPAY_API_V3_KEY || fileConfig.payment?.wechatpayApiV3Key || '',
+        process.env.WECHATPAY_API_V3_KEY || process.env.WECHAT_PAY_API_V3_KEY || fileConfig.payment?.wechatpayApiV3Key || '',
       wechatpayNotifyUrl:
-        process.env.WECHATPAY_NOTIFY_URL || fileConfig.payment?.wechatpayNotifyUrl || '',
+        process.env.WECHATPAY_NOTIFY_URL || process.env.WECHAT_PAY_NOTIFY_URL || fileConfig.payment?.wechatpayNotifyUrl || '',
       wechatpayPlatformCertificate:
-        process.env.WECHATPAY_PLATFORM_CERTIFICATE ||
+        process.env.WECHATPAY_PLATFORM_CERTIFICATE || process.env.WECHAT_PAY_PLATFORM_CERTIFICATE ||
         fileConfig.payment?.wechatpayPlatformCertificate ||
         '',
     },

@@ -16,7 +16,8 @@ const DOUYIN_API_BASE = 'https://open.douyin.com'
 
 export interface DouyinVideoPublishParams {
   accessToken: string
-  videoPath: string // 视频文件路径或 URL
+  openId: string
+  videoPath: string // HTTPS 视频源地址
   title: string
   description?: string
   atUsers?: string[] // @用户
@@ -62,10 +63,10 @@ export class DouyinService {
    * 流程：上传视频文件 → 发布视频 → 返回 video_id
    */
   async uploadAndPublish(params: DouyinVideoPublishParams): Promise<DouyinPublishResult> {
-    const { accessToken, videoPath, title, description } = params
+    const { accessToken, openId, videoPath, title, description } = params
 
     // Step 1: 上传视频文件获取 video_id
-    const uploadResult = await this.uploadVideo(accessToken, videoPath)
+    const uploadResult = await this.uploadVideo(accessToken, openId, videoPath)
     if (uploadResult.errorCode || !uploadResult.videoId) {
       return {
         videoId: '',
@@ -77,9 +78,8 @@ export class DouyinService {
 
     // Step 2: 发布视频
     const publishResult = await this.publishVideo(accessToken, {
-      videoId: uploadResult.videoId,
-      title,
-      description,
+      videoId: uploadResult.videoId, title, description, openId,
+      atUsers: params.atUsers, topics: params.topics, coverTimestamp: params.coverTimestamp,
     })
 
     return publishResult
@@ -90,6 +90,7 @@ export class DouyinService {
    */
   async uploadVideo(
     accessToken: string,
+    openId: string,
     videoPath: string,
   ): Promise<{
     videoId?: string
@@ -98,20 +99,32 @@ export class DouyinService {
     errorMsg?: string
   }> {
     try {
-      // 实际场景：分片上传视频文件到抖音
-      // 这里用 URL 方式上传作为示例
-      this.logger.log({ event: 'douyin_video_upload', videoPath })
-
-      // TODO: 实现实际的视频上传
-      // 抖音上传API: POST https://open.douyin.com/video/upload
-      // - multipart/form-data
-      // - video_file: 视频文件
-      // - access_token: 已获取的 access token
-      // 返回: { video_id, error_code, error_msg }
-
-      return {
-        videoId: `douyin-video-${Date.now()}`,
+      const sourceUrl = new URL(videoPath)
+      if (sourceUrl.protocol !== 'https:') {
+        return { errorCode: 'INVALID_VIDEO_SOURCE', errorMsg: '抖音自动发布仅接受 HTTPS 视频源地址' }
       }
+      this.logger.log({ event: 'douyin_video_upload', host: sourceUrl.host })
+      const source = await fetch(sourceUrl, { signal: AbortSignal.timeout(60_000) })
+      const contentLength = Number(source.headers.get('content-length') ?? 0)
+      if (!source.ok || contentLength > 300 * 1024 * 1024) {
+        return { errorCode: 'VIDEO_FETCH_FAILED', errorMsg: '无法获取视频，或视频超过 300MB' }
+      }
+      const media = await source.blob()
+      if (media.size > 300 * 1024 * 1024) {
+        return { errorCode: 'VIDEO_TOO_LARGE', errorMsg: '视频超过 300MB，请使用分片上传' }
+      }
+      const form = new FormData()
+      form.append('video', media, 'video.mp4')
+      const response = await fetch(`${DOUYIN_API_BASE}/api/douyin/v1/video/upload_video/?open_id=${encodeURIComponent(openId)}`, {
+        method: 'POST', headers: { 'access-token': accessToken }, body: form, signal: AbortSignal.timeout(90_000),
+      })
+      const payload = await response.json().catch(() => ({})) as { data?: { video?: { video_id?: string }; error_code?: number; description?: string }; extra?: { error_code?: number; description?: string } }
+      const errorCode = payload.data?.error_code ?? payload.extra?.error_code
+      const videoId = payload.data?.video?.video_id
+      if (!response.ok || errorCode || !videoId) {
+        return { errorCode: String(errorCode ?? response.status), errorMsg: payload.data?.description ?? payload.extra?.description ?? '抖音视频上传失败' }
+      }
+      return { videoId }
     } catch (error) {
       this.logger.error({ event: 'douyin_upload_failed', error: String(error) })
       return {
@@ -130,28 +143,34 @@ export class DouyinService {
       videoId: string
       title: string
       description?: string
+      openId: string
+      atUsers?: string[]
+      topics?: string[]
+      coverTimestamp?: number
     },
   ): Promise<DouyinPublishResult> {
     try {
-      // 抖音发布API: POST https://open.douyin.com/video/data/publish/
-      // Body: video_id, title, description, etc.
       const result = await lastValueFrom(
         this.httpService
           .post(
-            `${DOUYIN_API_BASE}/video/data/publish/`,
+            `${DOUYIN_API_BASE}/api/douyin/v1/video/create_video/`,
             {
               video_id: params.videoId,
-              title: params.title,
-              description: params.description ?? '',
+              text: this.composeText(params.title, params.description, params.topics),
+              ...(params.atUsers?.length ? { at_users: params.atUsers } : {}),
+              ...(params.coverTimestamp !== undefined ? { cover_tsp: params.coverTimestamp } : {}),
             },
-            { params: { access_token: accessToken } },
+            { params: { open_id: params.openId }, headers: { 'access-token': accessToken } },
           )
           .pipe(catchError((err) => throwError(() => err))),
       )
 
-      // TODO: 解析实际 API 响应
-      // 实际返回: { data: { video_id, error_code, error_msg }, errcode, errmsg }
-      const videoId = params.videoId
+      const payload = result.data as { data?: { item_id?: string; video_id?: string; error_code?: number; description?: string }; extra?: { error_code?: number; description?: string } }
+      const errorCode = payload.data?.error_code ?? payload.extra?.error_code
+      const videoId = payload.data?.item_id ?? payload.data?.video_id
+      if (errorCode || !videoId) {
+        return { videoId: '', videoUrl: '', errorCode: String(errorCode ?? 'CREATE_VIDEO_FAILED'), errorMsg: payload.data?.description ?? payload.extra?.description ?? '抖音视频创建失败' }
+      }
       const videoUrl = `https://www.douyin.com/video/${videoId}`
 
       this.logger.log({ event: 'douyin_publish_success', videoId })
@@ -191,19 +210,18 @@ export class DouyinService {
           .pipe(catchError((err) => throwError(() => err))),
       )
 
-      // TODO: 解析实际 API 响应
-      // 实际返回: { data: { video_list: [{ video_id, play_count, like_count, ... }] } }
+      const payload = result.data as { data?: { video_list?: Array<Record<string, unknown>>; list?: Array<Record<string, unknown>>; error_code?: number } }
+      const record = payload.data?.video_list?.[0] ?? payload.data?.list?.[0]
+      if (payload.data?.error_code || !record) return null
       this.logger.log({ event: 'douyin_stats_fetched', videoId })
-
-      // 占位返回
       return {
         videoId,
-        playCount: 0,
-        likeCount: 0,
-        commentCount: 0,
-        shareCount: 0,
-        collectCount: 0,
-        downloadCount: 0,
+        playCount: Number(record['play_count'] ?? 0),
+        likeCount: Number(record['like_count'] ?? 0),
+        commentCount: Number(record['comment_count'] ?? 0),
+        shareCount: Number(record['share_count'] ?? 0),
+        collectCount: Number(record['collect_count'] ?? 0),
+        downloadCount: Number(record['download_count'] ?? 0),
       }
     } catch (error) {
       this.logger.error({ event: 'douyin_stats_failed', videoId, error: String(error) })
@@ -270,9 +288,9 @@ export class DouyinService {
           .pipe(catchError((err) => throwError(() => err))),
       )
 
-      // TODO: 解析实际返回
-      // 检查用户类型: user_info.series (series = 1 为企业号)
-      return false
+      const payload = result.data as { data?: { user?: { is_enterprise?: boolean; account_type?: string; series?: number } }; is_enterprise?: boolean }
+      const user = payload.data?.user
+      return payload.is_enterprise === true || user?.is_enterprise === true || user?.account_type === 'enterprise' || user?.series === 1
     } catch (error) {
       this.logger.error({ event: 'douyin_enterprise_check_failed', error: String(error) })
       return false
@@ -350,5 +368,10 @@ export class DouyinService {
       valid: errors.length === 0,
       errors,
     }
+  }
+
+  private composeText(title: string, description?: string, topics?: string[]) {
+    const topicText = (topics ?? []).map((topic) => topic.startsWith('#') ? topic : `#${topic}`).join(' ')
+    return [title, description, topicText].filter(Boolean).join('\n').slice(0, 1000)
   }
 }

@@ -15,7 +15,9 @@ import {
   UseGuards,
   HttpCode,
   HttpStatus,
+  Req,
 } from '@nestjs/common'
+import { Request } from 'express'
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiResponse } from '@nestjs/swagger'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { CurrentUser } from '../auth/decorators/current-user.decorator'
@@ -25,11 +27,16 @@ import { UserRole } from '@ai-auto/shared'
 import { MerchantService } from './merchant.service'
 import { RegisterMerchantDto, UpdateMerchantProfileDto } from './dto/merchant-registration.dto'
 import { CreateStoreDto, UpdateStoreDto, ListStoresDto } from './dto/store.dto'
+import { CreateSubscriptionPaymentDto } from './dto/subscription-payment.dto'
+import { SubscriptionPaymentService } from './subscription-payment.service'
 
 @ApiTags('商户 API')
 @Controller('merchant')
 export class MerchantController {
-  constructor(private readonly merchantService: MerchantService) {}
+  constructor(
+    private readonly merchantService: MerchantService,
+    private readonly subscriptionPaymentService: SubscriptionPaymentService,
+  ) {}
 
   // ========================
   // 注册（无需认证）
@@ -137,8 +144,37 @@ export class MerchantController {
   @ApiBearerAuth()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: '订阅续费' })
-  async renewSubscription(@CurrentUser() _user: { merchantId: string }) {
-    // TODO: 接入支付后实现
-    return { code: 0, message: '续费功能开发中' }
+  async renewSubscription(
+    @CurrentUser() user: { merchantId: string },
+    @Body() dto: CreateSubscriptionPaymentDto,
+  ) {
+    return this.subscriptionPaymentService.createCheckout(user.merchantId, dto.provider, dto.planMonths)
+  }
+
+  @Get('subscription/payments/:orderNo')
+  @UseGuards(JwtAuthGuard)
+  @Roles(UserRole.MERCHANT_ADMIN)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: '查询订阅支付订单状态' })
+  async subscriptionPaymentStatus(@CurrentUser() user: { merchantId: string }, @Param('orderNo') orderNo: string) {
+    return this.subscriptionPaymentService.getOrder(user.merchantId, orderNo)
+  }
+
+  @Post('subscription/payments/alipay/notify')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: '支付宝订阅支付异步通知' })
+  async alipayNotify(@Body() params: Record<string, string>) {
+    return (await this.subscriptionPaymentService.handleAlipayNotification(params)) ? 'success' : 'fail'
+  }
+
+  @Post('subscription/payments/wechatpay/notify')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: '微信支付订阅异步通知' })
+  async wechatpayNotify(@Req() request: Request & { rawBody?: Buffer }) {
+    const accepted = await this.subscriptionPaymentService.handleWechatNotification(
+      request.headers,
+      request.rawBody ?? Buffer.from(JSON.stringify(request.body ?? {})),
+    )
+    return accepted ? { code: 'SUCCESS', message: '' } : { code: 'FAIL', message: 'signature verification failed' }
   }
 }

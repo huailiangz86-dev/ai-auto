@@ -33,6 +33,13 @@ export interface LifecyclePage<T> {
   items: T[]
   pagination: { page: number; pageSize: number; total: number; totalPages: number }
 }
+export interface MerchantLifecycleQuery extends Record<string, string | number | undefined> {
+  keyword?: string
+  status?: string
+  auditStatus?: string
+  page?: number
+  pageSize?: number
+}
 export interface MerchantLifecycle {
   id: string
   businessName: string
@@ -41,11 +48,27 @@ export interface MerchantLifecycle {
   administratorContact: { name: string | null; phone: string; email: string | null }
   industryCategory: string | null
   auditStatus: string
+  auditComment?: string | null
+  auditedAt?: string | null
+  businessType?: string
+  businessLicenseNo?: string | null
+  address?: { province: string | null; city: string | null; district: string | null; detail: string | null }
+  stores?: {
+    id: string
+    storeName: string
+    province: string | null
+    city: string | null
+    district: string | null
+    addressDetail: string | null
+    status: 'active' | 'inactive'
+  }[]
   subscriptionStatus: string
   status: 'active' | 'frozen'
   frozenAt: string | null
   frozenReason: string | null
   tags: string[]
+  createdAt: string
+  updatedAt: string
   summary: {
     activity: { campaigns: number; activeCampaigns: number }
     budget: { planned: number; spent: number }
@@ -56,6 +79,9 @@ export interface CreatorLifecycle {
   id: string
   nickname: string | null
   phone: string
+  wechatOpenid: string | null
+  wechatOpenidMasked: string | null
+  wechatUnionid: string | null
   auditStatus: string
   agentType: 'professional_creator' | 'ordinary_user'
   realNameVerified: boolean
@@ -72,7 +98,7 @@ export interface CreatorLifecycle {
   summary: {
     taskPerformance: { total: number; completed: number; fulfillmentRate: number; current: number }
     conversion: { redemptions: number; commissionEarned: number }
-    publishing: { published: number; total: number }
+    publishing: { contentTotal?: number; published: number; total: number; impressions?: number; clicks?: number }
   }
 }
 export interface LifecycleRelationship {
@@ -98,6 +124,29 @@ export interface LifecycleDetail {
     createdAt: string
   }[]
   relationships: LifecycleRelationship[]
+  contents?: {
+    id: string
+    contentType: string
+    targetPlatform: string | null
+    status: string
+    moderationStatus: string
+    trackingUrl: string | null
+    createdAt: string
+    performance: { impressions: number; clicks: number; claims: number }
+    publications: {
+      id: string
+      platform: string
+      status: string
+      platformPostId: string | null
+      platformPostUrl: string | null
+      publishedAt: string | null
+      impressions: number
+      clicks: number
+      comments: number
+      shares: number
+      likes: number
+    }[]
+  }[]
   audit: {
     id: string
     actionDescription: string
@@ -112,7 +161,7 @@ const qs = (query: Record<string, string | number | undefined>) => {
   })
   return params.toString() ? `?${params.toString()}` : ''
 }
-export const getLifecycleMerchants = (query: Record<string, string | number | undefined> = {}) =>
+export const getLifecycleMerchants = (query: MerchantLifecycleQuery = {}) =>
   request<LifecyclePage<MerchantLifecycle>>(`/admin/lifecycle/merchants${qs(query)}`)
 export const getLifecycleMerchant = (id: string) =>
   request<LifecycleDetail>(`/admin/lifecycle/merchants/${id}`)

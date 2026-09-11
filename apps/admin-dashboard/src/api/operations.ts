@@ -42,6 +42,7 @@ export interface PendingMerchant {
   phone: string
   businessType: string
   industryCategory: string
+  auditStatus: 'pending' | 'need_info'
   appliedAt: string
 }
 export interface PendingAgent {
@@ -295,7 +296,9 @@ export interface CreatorTaskAppeal {
   appealId: string
   creatorTaskId: string
   creatorId: string
+  merchantId: string
   payoutId: string | null
+  appellantType: 'creator' | 'merchant'
   target: 'task' | 'payout'
   status: 'open' | 'accepted' | 'rejected' | 'withdrawn'
   reason: string
@@ -303,6 +306,10 @@ export interface CreatorTaskAppeal {
   resolution: string | null
   resolvedBy: string | null
   resolvedAt: string | null
+  adjudicationDecision: 'uphold' | 'adjust_payout' | 'reverse_settlement' | null
+  amountBefore: number | null
+  amountAfter: number | null
+  financialLedgerEntryIds: string[]
   createdAt: string
   updatedAt: string
   creator: {
@@ -337,7 +344,68 @@ export interface CreatorTaskAppeal {
     verifiedAt?: string | null
     settleAt: string | null
     settledAt?: string | null
+    adjudicatedAmount?: number | null
+    adjudicatedAt?: string | null
   } | null
+}
+export type RecoveryRiskLevel = 'normal' | 'watch' | 'overdue' | 'critical'
+export interface RecoveryReceivable {
+  appealId: string
+  creatorId: string
+  creatorTaskId: string
+  payoutId: string | null
+  merchantId: string
+  resolvedAt: string | null
+  recoveryAmount: number
+  recoveredAmount: number
+  remainingAmount: number
+  lastOffsetAt: string | null
+  daysWithoutOffset: number
+  risk: { level: RecoveryRiskLevel; daysWithoutOffset: number; recommendedAction: string }
+  offsets: {
+    ledgerEntryId: string
+    amount: number
+    occurredAt: string
+    settlementPayoutId: string | null
+  }[]
+  wallet: {
+    recoveryReceivableAmount: number
+    availableBalance: number
+    pendingSettlementBalance: number
+  } | null
+  creator: {
+    nickname: string | null
+    phone: string
+    realNameVerified: boolean
+    auditStatus: string
+  } | null
+}
+export interface RecoveryReceivablesResult extends PageResult<RecoveryReceivable> {
+  summary: {
+    normal: number
+    watch: number
+    overdue: number
+    critical: number
+    outstandingAmount: number
+  }
+  policy: {
+    offset: string
+    thresholds: { watchDays: number; overdueDays: number; criticalDays: number }
+    automatedAction: string
+  }
+}
+export interface RecoveryReconciliation {
+  reconciledAt: string
+  walletReceivable: number
+  adjudicationReceivable: number
+  receivableDifference: number
+  receivableMatches: boolean
+  outstandingAdjudications: number
+  settlementOffsets: {
+    checkedPayouts: number
+    matches: boolean
+    mismatches: { payoutId: string; recordedOffset: number; payoutOffset: number }[]
+  }
 }
 export interface CreatorTaskQueueQuery {
   campaignId?: string
@@ -395,14 +463,23 @@ export const getCreatorTaskAppeals = (query: CreatorTaskAppealQuery = {}) =>
       summary: Record<'open' | 'accepted' | 'rejected' | 'withdrawn' | 'total', number>
     }
   >(`/admin/creator-tasks/appeals${queryString(query)}`)
+export const getRecoveryReceivables = (query: {
+  creatorId?: string
+  riskLevel?: 'all' | Exclude<RecoveryRiskLevel, 'normal'>
+  page?: number
+  pageSize?: number
+} = {}) => request<RecoveryReceivablesResult>(`/admin/creator-tasks/recovery-receivables${queryString(query)}`)
+export const getRecoveryReconciliation = () =>
+  request<RecoveryReconciliation>('/admin/creator-tasks/recovery-reconciliation')
 export const resolveCreatorTaskAppeal = (
   id: string,
-  decision: 'accepted' | 'rejected',
+  decision: 'uphold' | 'adjust_payout' | 'reverse_settlement',
   resolution: string,
+  adjustedAmount?: number,
 ) =>
   request<CreatorTaskAppeal>(`/admin/creator-tasks/appeals/${id}/resolve`, {
     method: 'POST',
-    body: JSON.stringify({ decision, resolution }),
+    body: JSON.stringify({ decision, resolution, adjustedAmount }),
   })
 export interface PilotOperationsMetrics {
   activatedCampaigns: number

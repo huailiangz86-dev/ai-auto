@@ -27,6 +27,7 @@ interface Actor {
 }
 const TERMINAL_CREATOR_STATES: CreatorTaskStatus[] = [
   'settled',
+  'declined',
   'expired',
   'cancelled',
   'violation',
@@ -34,7 +35,7 @@ const TERMINAL_CREATOR_STATES: CreatorTaskStatus[] = [
 const CREATOR_TRANSITIONS: Partial<Record<CreatorTaskStatus, CreatorTaskStatus[]>> = {
   created: ['matching', 'cancelled'],
   matching: ['invited', 'cancelled'],
-  invited: ['accepted', 'expired', 'cancelled'],
+  invited: ['accepted', 'declined', 'expired', 'cancelled'],
   accepted: ['creating', 'cancelled'],
   creating: ['submitted', 'cancelled'],
   submitted: ['approved', 'rejected'],
@@ -234,16 +235,17 @@ export class GrowthTaskService {
     creatorTaskId: string,
     target: CreatorTaskStatus,
     publishedUrl?: string,
+    stateReason?: string,
   ) {
     if (
-      !['accepted', 'creating', 'submitted', 'published', 'tracking', 'completed'].includes(target)
+      !['accepted', 'declined', 'creating', 'submitted', 'published', 'tracking', 'completed'].includes(target)
     )
       throw new BadRequestException('创作者不能执行该任务流转')
     return this.transitionCreatorTask(
       creatorTaskId,
       target,
       { id: creatorId, type: 'creator' },
-      { creatorId, publishedUrl },
+      { creatorId, publishedUrl, stateReason },
     )
   }
 
@@ -571,6 +573,7 @@ export class GrowthTaskService {
       task.stateChangedBy = actor.id
       task.stateChangedAt = new Date()
       if (options.publishedUrl) task.publishedUrl = String(options.publishedUrl)
+      if (options.stateReason !== undefined) task.stateReason = String(options.stateReason)
       if (options.reviewReason !== undefined) task.reviewReason = String(options.reviewReason)
       if (options.reviewedBy) task.reviewedBy = String(options.reviewedBy)
       if (options.reviewedAt) task.reviewedAt = options.reviewedAt as Date
@@ -601,6 +604,7 @@ export class GrowthTaskService {
         after: target,
         compensationLockedAt: task.compensationLockedAt ?? null,
         reviewReason: task.reviewReason ?? null,
+        stateReason: task.stateReason ?? null,
       })
       const eventType = (
         {

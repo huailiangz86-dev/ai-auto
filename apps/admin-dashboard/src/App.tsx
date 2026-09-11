@@ -25,6 +25,7 @@ import {
   Descriptions,
   Empty,
   Input,
+  InputNumber,
   Layout,
   Menu,
   Modal,
@@ -55,6 +56,7 @@ import {
 import { KpiCard } from './components/KpiCard'
 import { LoginPage } from './components/LoginPage'
 import { LifecycleManagement } from './LifecycleManagement'
+import { getLifecycleMerchant, type MerchantLifecycle } from './api/lifecycle'
 import { RiskRuleConfiguration } from './RiskRuleConfiguration'
 import { RelationshipManagement } from './RelationshipManagement'
 import { TrendChart } from './components/TrendChart'
@@ -81,6 +83,8 @@ import {
   getCreatorTaskWorkbench,
   getCampaignEconomics,
   getCreatorTaskAppeals,
+  getRecoveryReceivables,
+  getRecoveryReconciliation,
   reviewCreatorTask,
   resolveCreatorTaskAppeal,
   resolveCreatorTaskRisk,
@@ -88,6 +92,7 @@ import {
   type CreatorTaskWorkbench,
   type CampaignEconomics,
   type CreatorTaskAppeal,
+  type RecoveryReceivable,
   type FinancialLedgerEntry,
   getPilotOperationsMetrics,
   getPilotWeeklyEvidence,
@@ -538,6 +543,7 @@ const operationTitles: Record<OperationKey, string> = {
 function OperationsPage({ activeKey }: { activeKey: string }) {
   const key = activeKey as OperationKey
   const [reasonModal, contextHolder] = Modal.useModal()
+  const [auditDetailMerchantId, setAuditDetailMerchantId] = useState<string | null>(null)
   const [economicsCampaignId, setEconomicsCampaignId] = useState('')
   const [economicsMerchantId, setEconomicsMerchantId] = useState('')
   const [appealsStatus, setAppealsStatus] = useState<CreatorTaskAppeal['status'] | 'all'>('open')
@@ -550,6 +556,11 @@ function OperationsPage({ activeKey }: { activeKey: string }) {
     queryKey: ['pending-merchants'],
     queryFn: getPendingMerchants,
     enabled: key === 'merchants',
+  })
+  const auditMerchantDetail = useQuery({
+    queryKey: ['merchant-audit-detail', auditDetailMerchantId],
+    queryFn: () => getLifecycleMerchant(auditDetailMerchantId!),
+    enabled: Boolean(auditDetailMerchantId),
   })
   const agents = useQuery({
     queryKey: ['pending-agents'],
@@ -705,8 +716,10 @@ function OperationsPage({ activeKey }: { activeKey: string }) {
                     ['联系人', 'contactName'],
                     ['联系电话', 'phone'],
                     ['行业', 'industryCategory'],
+                    ['审核阶段', 'auditStatus'],
                     ['申请时间', 'appliedAt'],
                   ]}
+                  onDetail={setAuditDetailMerchantId}
                   onApprove={(id) => run(() => approveMerchant(id))}
                   onReject={(id) =>
                     askReason('拒绝商户申请', (reason) => rejectMerchant(id, reason))
@@ -716,12 +729,32 @@ function OperationsPage({ activeKey }: { activeKey: string }) {
             },
             {
               key: 'management',
-              label: '全量商户管理',
-              children: <LifecycleManagement kind="merchants" />,
+              label: '商户管理',
+              children: <LifecycleManagement kind="merchants" merchantAuditScope="approved" />,
+            },
+            {
+              key: 'rejected',
+              label: '资质审核未通过',
+              children: <LifecycleManagement kind="merchants" merchantAuditScope="rejected" />,
             },
           ]}
         />
       ) : null}
+      <Modal
+        open={Boolean(auditDetailMerchantId)}
+        title="商户资质详情"
+        width={820}
+        footer={<Button onClick={() => setAuditDetailMerchantId(null)}>关闭</Button>}
+        onCancel={() => setAuditDetailMerchantId(null)}
+      >
+        {auditMerchantDetail.isLoading ? (
+          <Skeleton active />
+        ) : auditMerchantDetail.isError ? (
+          <Result status="error" title="无法加载商户详情" subTitle={auditMerchantDetail.error.message} />
+        ) : auditMerchantDetail.data ? (
+          <MerchantAuditDetail profile={auditMerchantDetail.data.profile as MerchantLifecycle} />
+        ) : null}
+      </Modal>
       {!error && key === 'creator-review' ? (
         <CreatorTaskQueue
           mode="review"
@@ -829,40 +862,51 @@ function OperationsPage({ activeKey }: { activeKey: string }) {
         />
       ) : null}
       {!error && key === 'appeals' ? (
-        <AppealsDashboard
-          data={appeals.data}
-          status={appealsStatus}
-          target={appealsTarget}
-          merchantId={appealsMerchantId}
-          creatorId={appealsCreatorId}
-          taskId={appealsTaskId}
-          page={appealsPage}
-          loading={appeals.isFetching}
-          onStatusChange={(value) => {
-            setAppealsStatus(value)
-            setAppealsPage(1)
-          }}
-          onTargetChange={(value) => {
-            setAppealsTarget(value)
-            setAppealsPage(1)
-          }}
-          onMerchantIdChange={(value) => {
-            setAppealsMerchantId(value)
-            setAppealsPage(1)
-          }}
-          onCreatorIdChange={(value) => {
-            setAppealsCreatorId(value)
-            setAppealsPage(1)
-          }}
-          onTaskIdChange={(value) => {
-            setAppealsTaskId(value)
-            setAppealsPage(1)
-          }}
-          onPageChange={setAppealsPage}
-          onRefresh={() => void appeals.refetch()}
-          onResolve={(id, decision, resolution) =>
-            run(() => resolveCreatorTaskAppeal(id, decision, resolution))
-          }
+        <Tabs
+          items={[
+            {
+              key: 'appeals',
+              label: `申诉裁决（${appeals.data?.summary.open ?? 0}）`,
+              children: (
+                <AppealsDashboard
+                  data={appeals.data}
+                  status={appealsStatus}
+                  target={appealsTarget}
+                  merchantId={appealsMerchantId}
+                  creatorId={appealsCreatorId}
+                  taskId={appealsTaskId}
+                  page={appealsPage}
+                  loading={appeals.isFetching}
+                  onStatusChange={(value) => {
+                    setAppealsStatus(value)
+                    setAppealsPage(1)
+                  }}
+                  onTargetChange={(value) => {
+                    setAppealsTarget(value)
+                    setAppealsPage(1)
+                  }}
+                  onMerchantIdChange={(value) => {
+                    setAppealsMerchantId(value)
+                    setAppealsPage(1)
+                  }}
+                  onCreatorIdChange={(value) => {
+                    setAppealsCreatorId(value)
+                    setAppealsPage(1)
+                  }}
+                  onTaskIdChange={(value) => {
+                    setAppealsTaskId(value)
+                    setAppealsPage(1)
+                  }}
+                  onPageChange={setAppealsPage}
+                  onRefresh={() => void appeals.refetch()}
+                  onResolve={(id, decision, resolution, adjustedAmount) =>
+                    run(() => resolveCreatorTaskAppeal(id, decision, resolution, adjustedAmount))
+                  }
+                />
+              ),
+            },
+            { key: 'recovery', label: '待追回款运营', children: <RecoveryReceivablesDashboard /> },
+          ]}
         />
       ) : null}
       {!error && key === 'pilot-evidence' && pilot.data ? (
@@ -1076,14 +1120,20 @@ function AppealsDashboard({
   onTaskIdChange: (value: string) => void
   onPageChange: (value: number) => void
   onRefresh: () => void
-  onResolve: (id: string, decision: 'accepted' | 'rejected', resolution: string) => Promise<unknown>
+  onResolve: (
+    id: string,
+    decision: 'uphold' | 'adjust_payout' | 'reverse_settlement',
+    resolution: string,
+    adjustedAmount?: number,
+  ) => Promise<unknown>
 }) {
   const [selected, setSelected] = useState<CreatorTaskAppeal | null>(null)
   const [resolutionTarget, setResolutionTarget] = useState<{
     appeal: CreatorTaskAppeal
-    decision: 'accepted' | 'rejected'
+    decision: 'uphold' | 'adjust_payout' | 'reverse_settlement'
   } | null>(null)
   const [resolutionText, setResolutionText] = useState('')
+  const [adjustedAmount, setAdjustedAmount] = useState<number | null>(null)
   const summary = data?.summary
   const items = data?.items ?? []
   const columns: ColumnsType<CreatorTaskAppeal> = [
@@ -1128,13 +1178,18 @@ function AppealsDashboard({
     },
     { title: '目标', dataIndex: 'target', render: formatAppealTarget },
     { title: '状态', dataIndex: 'status', render: formatAppealStatus },
+    {
+      title: '最终决定',
+      dataIndex: 'adjudicationDecision',
+      render: (value) => (value ? formatAdjudicationDecision(value) : '待裁决'),
+    },
     { title: '申诉原因', dataIndex: 'reason', ellipsis: true },
     {
       title: '报酬',
       key: 'payout',
       render: (_, row) =>
         row.payout
-          ? `${formatCurrency(row.payout.verifiedAmount ?? row.payout.expectedAmount, 2)} · ${row.payout.status}`
+          ? `${formatCurrency(row.amountBefore ?? row.payout.verifiedAmount ?? row.payout.expectedAmount, 2)} → ${formatCurrency(row.amountAfter ?? row.payout.adjudicatedAmount ?? row.payout.verifiedAmount ?? row.payout.expectedAmount, 2)} · ${row.payout.status}`
           : '—',
     },
     { title: '提交时间', dataIndex: 'createdAt', render: formatDate },
@@ -1152,21 +1207,39 @@ function AppealsDashboard({
               <Button
                 type="link"
                 onClick={() => {
-                  setResolutionTarget({ appeal: row, decision: 'accepted' })
+                  setResolutionTarget({ appeal: row, decision: 'uphold' })
                   setResolutionText('')
+                  setAdjustedAmount(null)
                 }}
               >
-                接受
+                维持原结果
+              </Button>
+              <Button
+                type="link"
+                onClick={() => {
+                  setResolutionTarget({ appeal: row, decision: 'adjust_payout' })
+                  setResolutionText('')
+                  setAdjustedAmount(
+                    row.payout?.adjudicatedAmount ??
+                      row.payout?.verifiedAmount ??
+                      row.payout?.expectedAmount ??
+                      null,
+                  )
+                }}
+              >
+                调整报酬
               </Button>
               <Button
                 danger
                 type="link"
+                disabled={!row.payout || !['verified', 'settled'].includes(row.payout.status)}
                 onClick={() => {
-                  setResolutionTarget({ appeal: row, decision: 'rejected' })
+                  setResolutionTarget({ appeal: row, decision: 'reverse_settlement' })
                   setResolutionText('')
+                  setAdjustedAmount(null)
                 }}
               >
-                驳回
+                撤销/追回
               </Button>
             </>
           ) : null}
@@ -1175,14 +1248,23 @@ function AppealsDashboard({
     },
   ]
   const handleResolve = async () => {
-    if (!resolutionTarget || !resolutionText.trim()) {
-      message.error('请填写处理说明')
+    if (
+      !resolutionTarget ||
+      !resolutionText.trim() ||
+      (resolutionTarget.decision === 'adjust_payout' && adjustedAmount == null)
+    ) {
+      message.error(
+        resolutionTarget?.decision === 'adjust_payout'
+          ? '请填写调整后金额和处理依据'
+          : '请填写处理依据',
+      )
       return
     }
     await onResolve(
       resolutionTarget.appeal.appealId,
       resolutionTarget.decision,
       resolutionText.trim(),
+      adjustedAmount ?? undefined,
     )
     setResolutionTarget(null)
     setResolutionText('')
@@ -1290,6 +1372,9 @@ function AppealsDashboard({
             <Descriptions.Item label="申诉对象">
               {formatAppealTarget(selected.target)}
             </Descriptions.Item>
+            <Descriptions.Item label="申诉方">
+              {selected.appellantType === 'merchant' ? '商户' : '创作者'}
+            </Descriptions.Item>
             <Descriptions.Item label="申诉原因" span={2}>
               {selected.reason}
             </Descriptions.Item>
@@ -1298,15 +1383,37 @@ function AppealsDashboard({
                 {JSON.stringify(selected.evidence, null, 2)}
               </Typography.Paragraph>
             </Descriptions.Item>
-            <Descriptions.Item label="历史处理" span={2}>
+            <Descriptions.Item label="核验凭证" span={2}>
+              <Typography.Paragraph style={{ margin: 0, whiteSpace: 'pre-wrap' }}>
+                {JSON.stringify(selected.payout?.verificationEvidence ?? {}, null, 2)}
+              </Typography.Paragraph>
+            </Descriptions.Item>
+            <Descriptions.Item label="裁决金额" span={2}>
+              {selected.amountBefore == null
+                ? '待裁决'
+                : `${formatCurrency(selected.amountBefore, 2)} → ${formatCurrency(selected.amountAfter ?? selected.amountBefore, 2)}`}
+            </Descriptions.Item>
+            <Descriptions.Item label="最终决定" span={2}>
+              {selected.adjudicationDecision
+                ? formatAdjudicationDecision(selected.adjudicationDecision)
+                : '尚未裁决'}
+            </Descriptions.Item>
+            <Descriptions.Item label="处理依据" span={2}>
               {selected.resolution || '尚未处理'}
+            </Descriptions.Item>
+            <Descriptions.Item label="财务流水" span={2}>
+              {selected.financialLedgerEntryIds?.length
+                ? selected.financialLedgerEntryIds.join('、')
+                : '本裁决未产生金额变动流水'}
             </Descriptions.Item>
           </Descriptions>
         ) : null}
       </Modal>
       <Modal
         open={Boolean(resolutionTarget)}
-        title={resolutionTarget?.decision === 'accepted' ? '接受申诉' : '驳回申诉'}
+        title={
+          resolutionTarget ? formatAdjudicationDecision(resolutionTarget.decision) : '申诉裁决'
+        }
         onCancel={() => setResolutionTarget(null)}
         onOk={() => void handleResolve()}
         okText="确认处理"
@@ -1316,9 +1423,211 @@ function AppealsDashboard({
           autoFocus
           value={resolutionText}
           onChange={(event) => setResolutionText(event.target.value)}
-          placeholder="请填写处理说明，系统会写入审计并通知创作者"
+          placeholder="请填写处理依据，系统将写入不可变审计并通知双方"
           rows={5}
         />
+        {resolutionTarget?.decision === 'adjust_payout' ? (
+          <div style={{ marginTop: 16 }}>
+            <Typography.Text strong>调整后报酬（CNY）</Typography.Text>
+            <InputNumber
+              min={0}
+              precision={2}
+              value={adjustedAmount}
+              onChange={setAdjustedAmount}
+              style={{ display: 'block', width: '100%', marginTop: 8 }}
+            />
+          </div>
+        ) : null}
+        {resolutionTarget?.decision === 'reverse_settlement' ? (
+          <Alert
+            style={{ marginTop: 16 }}
+            type="warning"
+            showIcon
+            message="将撤销该笔报酬；已结算资金会从可用钱包追回，余额不足部分记为待追回款。"
+          />
+        ) : null}
+      </Modal>
+    </>
+  )
+}
+
+function RecoveryReceivablesDashboard() {
+  const [riskLevel, setRiskLevel] = useState<'all' | 'watch' | 'overdue' | 'critical'>('all')
+  const [page, setPage] = useState(1)
+  const [selected, setSelected] = useState<RecoveryReceivable | null>(null)
+  const recovery = useQuery({
+    queryKey: ['recovery-receivables', riskLevel, page],
+    queryFn: () => getRecoveryReceivables({ riskLevel, page, pageSize: 20 }),
+  })
+  const reconciliation = useQuery({
+    queryKey: ['recovery-reconciliation'],
+    queryFn: getRecoveryReconciliation,
+  })
+  const data = recovery.data
+  const reconciliationData = reconciliation.data
+  const riskMeta: Record<RecoveryReceivable['risk']['level'], { label: string; color: string }> = {
+    normal: { label: '正常自动追回', color: 'default' },
+    watch: { label: '7 天待跟进', color: 'gold' },
+    overdue: { label: '30 天已超期', color: 'orange' },
+    critical: { label: '60 天重点处置', color: 'red' },
+  }
+  const columns: ColumnsType<RecoveryReceivable> = [
+    {
+      title: '裁决 / 创作者',
+      key: 'appeal',
+      render: (_, row) => (
+        <Space direction="vertical" size={0}>
+          <Typography.Text strong>{row.creator?.nickname || '未命名创作者'}</Typography.Text>
+          <Typography.Text type="secondary">裁决 {row.appealId}</Typography.Text>
+        </Space>
+      ),
+    },
+    {
+      title: '追回进度',
+      key: 'progress',
+      render: (_, row) => (
+        <Space direction="vertical" size={0}>
+          <span>{formatCurrency(row.recoveredAmount, 2)} / {formatCurrency(row.recoveryAmount, 2)}</span>
+          <Typography.Text strong type="danger">待追回 {formatCurrency(row.remainingAmount, 2)}</Typography.Text>
+        </Space>
+      ),
+    },
+    {
+      title: '最后抵扣',
+      key: 'offset',
+      render: (_, row) => (
+        <Space direction="vertical" size={0}>
+          <span>{row.lastOffsetAt ? formatDate(row.lastOffsetAt) : '尚无后续结算抵扣'}</span>
+          <Typography.Text type="secondary">{row.offsets.length} 笔抵扣流水</Typography.Text>
+        </Space>
+      ),
+    },
+    {
+      title: '无抵扣天数 / 分级',
+      key: 'risk',
+      render: (_, row) => (
+        <Space direction="vertical" size={4}>
+          <span>{row.daysWithoutOffset} 天</span>
+          <Tag color={riskMeta[row.risk.level].color}>{riskMeta[row.risk.level].label}</Tag>
+        </Space>
+      ),
+    },
+    {
+      title: '建议处置',
+      dataIndex: ['risk', 'recommendedAction'],
+      ellipsis: true,
+    },
+    {
+      title: '操作',
+      key: 'action',
+      fixed: 'right',
+      render: (_, row) => <Button type="link" onClick={() => setSelected(row)}>查看裁决与流水</Button>,
+    },
+  ]
+  const refresh = () => {
+    void recovery.refetch()
+    void reconciliation.refetch()
+  }
+  return (
+    <>
+      <Alert
+        showIcon
+        type={reconciliationData?.receivableMatches && reconciliationData.settlementOffsets.matches ? 'success' : 'warning'}
+        className="operation-summary"
+        message={
+          reconciliationData
+            ? `每日对账：钱包待追回 ${formatCurrency(reconciliationData.walletReceivable, 2)}，裁决待追回 ${formatCurrency(reconciliationData.adjudicationReceivable, 2)}；${reconciliationData.receivableMatches && reconciliationData.settlementOffsets.matches ? '余额与抵扣流水均一致' : '发现需人工核查的差异'}`
+            : '正在读取待追回款每日对账结果'
+        }
+        description={
+          reconciliationData && (!reconciliationData.receivableMatches || !reconciliationData.settlementOffsets.matches)
+            ? `余额差额 ${formatCurrency(reconciliationData.receivableDifference, 2)}；抵扣不一致结算 ${reconciliationData.settlementOffsets.mismatches.length} 笔。`
+            : undefined
+        }
+      />
+      <Card className="filter-card section-block" size="small">
+        <Space wrap>
+          <Select
+            value={riskLevel}
+            onChange={(value) => { setRiskLevel(value); setPage(1) }}
+            aria-label="待追回风险等级"
+            options={[
+              { value: 'all', label: '全部待追回款' },
+              { value: 'watch', label: '7 天待跟进' },
+              { value: 'overdue', label: '30 天超期' },
+              { value: 'critical', label: '60 天重点处置' },
+            ]}
+          />
+          <Button icon={<ReloadOutlined spin={recovery.isFetching || reconciliation.isFetching} />} onClick={refresh} loading={recovery.isFetching || reconciliation.isFetching}>
+            刷新对账与队列
+          </Button>
+        </Space>
+      </Card>
+      <Alert
+        showIcon
+        type="info"
+        className="section-block"
+        message={data?.policy.offset ?? '后续结算会优先抵扣待追回款。'}
+        description={data?.policy.automatedAction}
+      />
+      <Row gutter={[12, 12]} className="section-block">
+        <Col xs={12} sm={6}><Statistic title="待追回余额" value={data?.summary.outstandingAmount ?? 0} precision={2} prefix="¥" /></Col>
+        <Col xs={12} sm={6}><Statistic title="7 天待跟进" value={data?.summary.watch ?? 0} /></Col>
+        <Col xs={12} sm={6}><Statistic title="30 天超期" value={data?.summary.overdue ?? 0} valueStyle={{ color: '#d46b08' }} /></Col>
+        <Col xs={12} sm={6}><Statistic title="60 天重点处置" value={data?.summary.critical ?? 0} valueStyle={{ color: '#cf1322' }} /></Col>
+      </Row>
+      <Card>
+        <Table
+          rowKey="appealId"
+          columns={columns}
+          dataSource={data?.items ?? []}
+          loading={recovery.isLoading}
+          scroll={{ x: 1180 }}
+          pagination={{
+            current: data?.pagination.page ?? page,
+            pageSize: data?.pagination.pageSize ?? 20,
+            total: data?.pagination.total ?? 0,
+            showSizeChanger: false,
+            onChange: setPage,
+          }}
+          locale={{ emptyText: '当前筛选范围没有待追回裁决' }}
+        />
+      </Card>
+      <Modal
+        open={Boolean(selected)}
+        title="待追回裁决与自动抵扣流水"
+        onCancel={() => setSelected(null)}
+        footer={<Button onClick={() => setSelected(null)}>关闭</Button>}
+        width={820}
+      >
+        {selected ? (
+          <>
+            <Descriptions bordered size="small" column={2}>
+              <Descriptions.Item label="裁决 ID">{selected.appealId}</Descriptions.Item>
+              <Descriptions.Item label="裁决时间">{selected.resolvedAt ? formatDate(selected.resolvedAt) : '—'}</Descriptions.Item>
+              <Descriptions.Item label="应追回">{formatCurrency(selected.recoveryAmount, 2)}</Descriptions.Item>
+              <Descriptions.Item label="已追回">{formatCurrency(selected.recoveredAmount, 2)}</Descriptions.Item>
+              <Descriptions.Item label="剩余待追回">{formatCurrency(selected.remainingAmount, 2)}</Descriptions.Item>
+              <Descriptions.Item label="最后一次抵扣">{selected.lastOffsetAt ? formatDate(selected.lastOffsetAt) : '尚无'}</Descriptions.Item>
+              <Descriptions.Item label="超期天数">{selected.daysWithoutOffset} 天</Descriptions.Item>
+              <Descriptions.Item label="运营建议">{selected.risk.recommendedAction}</Descriptions.Item>
+            </Descriptions>
+            <Table
+              style={{ marginTop: 16 }}
+              size="small"
+              rowKey="ledgerEntryId"
+              pagination={false}
+              dataSource={selected.offsets}
+              columns={[
+                { title: '抵扣流水', dataIndex: 'ledgerEntryId' },
+                { title: '抵扣金额', dataIndex: 'amount', render: (value) => formatCurrency(value, 2) },
+                { title: '对应后续结算', dataIndex: 'settlementPayoutId', render: (value) => value || '—' },
+                { title: '抵扣时间', dataIndex: 'occurredAt', render: formatDate },
+              ]}
+              locale={{ emptyText: '尚无后续结算抵扣流水' }}
+            />
+          </>
+        ) : null}
       </Modal>
     </>
   )
@@ -1740,12 +2049,14 @@ function AuditTable<T extends object>({
   rows,
   idKey,
   columns,
+  onDetail,
   onApprove,
   onReject,
 }: {
   rows: T[]
   idKey: keyof T
   columns: [string, keyof T][]
+  onDetail?: (id: string) => void
   onApprove: (id: string) => void
   onReject: (id: string) => void
 }) {
@@ -1753,13 +2064,23 @@ function AuditTable<T extends object>({
     ...columns.map(([title, key]) => ({
       title,
       dataIndex: key as string,
-      render: (value: unknown) => String(value ?? '—'),
+      render: (value: unknown) =>
+        key === 'auditStatus'
+          ? value === 'need_info'
+            ? '待补充资料'
+            : '待审核'
+          : String(value ?? '—'),
     })),
     {
       title: '操作',
       key: 'action',
       render: (_, row) => (
         <Space>
+          {onDetail && (
+            <Button type="link" onClick={() => onDetail(String(row[idKey]))}>
+              详情
+            </Button>
+          )}
           <Popconfirm title="确认通过该申请？" onConfirm={() => onApprove(String(row[idKey]))}>
             <Button type="link">通过</Button>
           </Popconfirm>
@@ -1780,6 +2101,45 @@ function AuditTable<T extends object>({
         scroll={{ x: 720 }}
       />
     </Card>
+  )
+}
+
+function MerchantAuditDetail({ profile }: { profile: MerchantLifecycle }) {
+  const address = [profile.address?.province, profile.address?.city, profile.address?.district, profile.address?.detail]
+    .filter(Boolean)
+    .join('')
+  return (
+    <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+      <Descriptions bordered size="small" column={2}>
+        <Descriptions.Item label="商户名称">{profile.businessName}</Descriptions.Item>
+        <Descriptions.Item label="商户类型">{profile.businessType || '—'}</Descriptions.Item>
+        <Descriptions.Item label="行业分类">{profile.industryCategory || '—'}</Descriptions.Item>
+        <Descriptions.Item label="营业执照号">{profile.businessLicenseNo || '—'}</Descriptions.Item>
+        <Descriptions.Item label="联系人">{profile.administratorContact.name || '—'}</Descriptions.Item>
+        <Descriptions.Item label="联系电话">{profile.administratorContact.phone || '—'}</Descriptions.Item>
+        <Descriptions.Item label="联系邮箱" span={2}>{profile.administratorContact.email || '—'}</Descriptions.Item>
+        <Descriptions.Item label="商户地址" span={2}>{address || '—'}</Descriptions.Item>
+        <Descriptions.Item label="申请时间" span={2}>{formatDate(profile.createdAt)}</Descriptions.Item>
+      </Descriptions>
+      <Typography.Title level={5} style={{ marginBottom: 0 }}>申请门店</Typography.Title>
+      <Table
+        size="small"
+        rowKey="id"
+        pagination={false}
+        dataSource={profile.stores ?? []}
+        locale={{ emptyText: '暂无门店资料' }}
+        columns={[
+          { title: '门店名称', dataIndex: 'storeName' },
+          {
+            title: '地址',
+            key: 'address',
+            render: (_, store) =>
+              [store.province, store.city, store.district, store.addressDetail].filter(Boolean).join('') || '—',
+          },
+          { title: '状态', dataIndex: 'status', render: (value) => (value === 'active' ? '正常' : '停用') },
+        ]}
+      />
+    </Space>
   )
 }
 
@@ -2046,6 +2406,13 @@ function formatAppealStatus(value: CreatorTaskAppeal['status']) {
     withdrawn: 'default',
   }
   return <Tag color={colors[value]}>{labels[value]}</Tag>
+}
+function formatAdjudicationDecision(value: NonNullable<CreatorTaskAppeal['adjudicationDecision']>) {
+  return {
+    uphold: '维持原结果',
+    adjust_payout: '调整报酬',
+    reverse_settlement: '撤销/追回结算',
+  }[value]
 }
 function shortId(value: string | null) {
   return value ? `${value.slice(0, 8)}...` : '—'

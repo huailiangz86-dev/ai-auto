@@ -3,11 +3,12 @@
     <view v-if="coupon" class="redemption">
       <text class="merchant">{{ coupon.merchantName || '商家优惠券' }}</text>
       <text class="name">{{ coupon.couponName }}</text>
-      <view class="qr-placeholder">
-        <text>券码</text>
+      <view class="coupon-code">
+        <text class="code-label">核销券码</text>
         <text class="code">{{ coupon.couponCode }}</text>
+        <button class="copy-code" @tap="copyCode">复制券码</button>
       </view>
-      <text class="hint">请向商家出示此券码，核销后状态会自动更新</text>
+      <text class="hint">向商家出示或报出此券码即可核销，核销后状态会自动更新</text>
       <text class="expire">有效期至 {{ formatDate(coupon.expireAt) }}</text>
       <view v-if="evidence" class="evidence">
         <text class="evidence-title">核销证据</text>
@@ -83,6 +84,14 @@ function fallbackSharePath() {
     : '/pages/home/index'
 }
 
+function copyCode() {
+  if (!coupon.value) return
+  uni.setClipboardData({
+    data: coupon.value.couponCode,
+    success: () => uni.showToast({ title: '券码已复制', icon: 'success' }),
+  })
+}
+
 onShareAppMessage((): any => ({
   title: coupon.value ? `送你一张${coupon.value.couponName}` : '附近优惠等你领',
   path: promotionStore.shareContext?.sharePath ?? fallbackSharePath(),
@@ -134,24 +143,29 @@ onShow(() => {
   font-size: 38rpx;
   font-weight: 700;
 }
-.qr-placeholder {
+.coupon-code {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  width: 440rpx;
-  height: 440rpx;
+  width: 100%;
+  min-height: 260rpx;
   margin: 52rpx 0 28rpx;
-  color: #333;
-  border: 16rpx solid #333;
+  color: #1f2937;
+  background: #f8fafc;
+  border: 2rpx dashed #94a3b8;
+  border-radius: 18rpx;
   box-sizing: border-box;
 }
+.code-label { color: #64748b; font-size: 24rpx; }
 .code {
-  margin-top: 24rpx;
+  margin-top: 18rpx;
   font-family: monospace;
-  font-size: 30rpx;
-  letter-spacing: 3rpx;
+  font-size: 38rpx;
+  font-weight: 600;
+  letter-spacing: 4rpx;
 }
+.copy-code { margin-top: 22rpx; padding: 0 28rpx; color: #07c160; font-size: 24rpx; line-height: 58rpx; background: #fff; border: 1rpx solid #07c160; border-radius: 29rpx; }
 .hint,
 .expire {
   color: #999;

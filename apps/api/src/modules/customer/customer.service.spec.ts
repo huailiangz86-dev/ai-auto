@@ -523,5 +523,53 @@ describe('CustomerService', () => {
         where: { id: 'another-customers-request', customerId: 'customer-123' },
       })
     })
+
+    it('completes a queued request and exports only the customer’s records', async () => {
+      const completedAt = new Date('2026-09-07T01:00:00.000Z')
+      dataExportRequestRepo.findOne.mockResolvedValueOnce({
+        id: 'request-123',
+        customerId: 'customer-123',
+        status: 'pending',
+      })
+      dataExportRequestRepo.save.mockImplementationOnce((request: any) => request)
+      customerRepo.findOne.mockResolvedValueOnce({
+        id: 'customer-123',
+        phone: '13800138000',
+        createdAt: completedAt,
+      })
+      attributionRepo.find.mockResolvedValueOnce([{ id: 'attribution-123', customerId: 'customer-123' }])
+      customerCouponRepo.find.mockResolvedValueOnce([{ id: 'coupon-123', customerId: 'customer-123' }])
+      redemptionRepo.find.mockResolvedValueOnce([{ id: 'redemption-123', customerId: 'customer-123' }])
+
+      const result = await service.downloadPersonalDataExport('customer-123', 'request-123')
+
+      expect(dataExportRequestRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'completed', completedAt: expect.any(Date) }),
+      )
+      expect(result).toEqual(
+        expect.objectContaining({
+          requestId: 'request-123',
+          format: 'json',
+          data: expect.objectContaining({
+            profile: expect.objectContaining({ customerId: 'customer-123', phone: '13800138000' }),
+            attributions: [{ id: 'attribution-123', customerId: 'customer-123' }],
+            coupons: [{ id: 'coupon-123', customerId: 'customer-123' }],
+            redemptions: [{ id: 'redemption-123', customerId: 'customer-123' }],
+          }),
+        }),
+      )
+    })
+
+    it('does not download a failed export request', async () => {
+      dataExportRequestRepo.findOne.mockResolvedValueOnce({
+        id: 'request-123',
+        customerId: 'customer-123',
+        status: 'failed',
+      })
+
+      await expect(service.downloadPersonalDataExport('customer-123', 'request-123')).rejects.toThrow(
+        BadRequestException,
+      )
+    })
   })
 })

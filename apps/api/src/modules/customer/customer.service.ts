@@ -366,15 +366,22 @@ export class CustomerService {
 
   /** Returns the authenticated customer's complete platform-held data in JSON. */
   async downloadPersonalDataExport(customerId: string, requestId: string) {
-    const request = await this.dataExportRequestRepo.findOne({
+    let request = await this.dataExportRequestRepo.findOne({
       where: { id: requestId, customerId },
     })
     if (!request) {
       // Do not reveal whether another customer's request ID exists.
       throw new NotFoundException({ code: 5010, message: '数据导出请求不存在' })
     }
-    if (request.status !== 'completed') {
-      throw new BadRequestException({ code: 5011, message: '数据导出尚未完成' })
+    // Exports are generated from the current source records at download time. Complete
+    // legacy queued requests here as well: there is no separate worker or artifact that
+    // can complete them, and otherwise they would remain permanently undownloadable.
+    if (request.status === 'pending' || request.status === 'processing') {
+      request.status = 'completed'
+      request.completedAt = new Date()
+      request = await this.dataExportRequestRepo.save(request)
+    } else if (request.status !== 'completed') {
+      throw new BadRequestException({ code: 5011, message: '数据导出请求不可下载' })
     }
 
     const [customer, attributions, coupons, redemptions] = await Promise.all([

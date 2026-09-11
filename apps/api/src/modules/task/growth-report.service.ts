@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common'
+import { Injectable, NotFoundException, Optional } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { RedemptionStatus } from '@ai-auto/shared'
 import { In, Repository } from 'typeorm'
@@ -14,6 +14,7 @@ import {
 import { CustomerAttribution } from '../customer/entities/customer-attribution.entity'
 import { CampaignBudgetAllocation } from './entities/campaign-budget-allocation.entity'
 import { CreatorTask, CampaignCreditLedgerEntry, GrowthTask } from './entities/growth-task.entity'
+import { CreatorTaskPayout } from './entities/creator-task-payout.entity'
 import { GrowthPlan } from './entities/growth-plan.entity'
 import { IncrementalityMeasurementService } from './incrementality-measurement.service'
 
@@ -39,6 +40,9 @@ export class GrowthReportService {
     @InjectRepository(FinancialLedgerEntry)
     private readonly financialLedger: Repository<FinancialLedgerEntry>,
     private readonly incrementality: IncrementalityMeasurementService,
+    @Optional()
+    @InjectRepository(CreatorTaskPayout)
+    private readonly creatorTaskPayouts?: Repository<CreatorTaskPayout>,
   ) {}
 
   async report(merchantId: string, planId: string) {
@@ -69,13 +73,16 @@ export class GrowthReportService {
     const attributionIds = redemptions.flatMap((redemption) =>
       redemption.attributionId ? [redemption.attributionId] : [],
     )
-    const [credits, attributions, contents] = await Promise.all([
+    const [credits, attributions, contents, taskPayouts] = await Promise.all([
       creatorTaskIds.length
         ? this.creditLedger.find({ where: { creatorTaskId: In(creatorTaskIds) } })
         : [],
       attributionIds.length ? this.attributions.find({ where: { id: In(attributionIds) } }) : [],
       creatorTaskIds.length
         ? this.contents.find({ where: { creatorTaskId: In(creatorTaskIds) } })
+        : [],
+      creatorTaskIds.length && this.creatorTaskPayouts
+        ? this.creatorTaskPayouts.find({ where: { creatorTaskId: In(creatorTaskIds) } })
         : [],
     ])
     const contentIds = contents.map((content) => content.id)
@@ -120,12 +127,31 @@ export class GrowthReportService {
     const baselineValue = Number(growthTask.baselineValue),
       targetValue = Number(growthTask.targetValue),
       targetDelta = Math.max(targetValue - baselineValue, 0)
-    const creatorPayout = Math.max(
-      this.sum(commissions, 'agentFinalPayout'),
-      this.sum(
-        ledger.filter((entry) => entry.classification === 'cogs'),
-        'amount',
+    const taskPayoutBase = this.sum(
+      taskPayouts.filter((payout) =>
+        ['verified', 'settled', 'risk_hold', 'reversed'].includes(payout.status),
       ),
+      'verifiedAmount',
+    )
+    const adjudicationAdjustment = this.sum(
+      ledger.filter((entry) =>
+        ['appeal_payout_adjustment', 'appeal_payout_reversal'].includes(entry.entryType),
+      ),
+      'amount',
+    )
+    const otherLedgerCogs = this.sum(
+      ledger.filter(
+        (entry) =>
+          entry.classification === 'cogs' &&
+          !['appeal_payout_adjustment', 'appeal_payout_reversal'].includes(entry.entryType),
+      ),
+      'amount',
+    )
+    // The adjustment ledger is a delta, so it is added to the immutable
+    // original Creator Task payout before calculating merchant ROI.
+    const creatorPayout = this.money(
+      Math.max(this.sum(commissions, 'agentFinalPayout'), taskPayoutBase, otherLedgerCogs) +
+        adjudicationAdjustment,
     )
     const discountCost = this.sum(redemptions, 'discountValue')
     const consumedCredits = this.sum(

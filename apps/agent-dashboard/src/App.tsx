@@ -103,6 +103,26 @@ function Auth({ onAuthenticated }: { onAuthenticated: () => void }) {
 }
 function Portal({ onLogout }: { onLogout: () => void }) {
   const [page, setPage] = useState('overview')
+  const [taskDetailId, setTaskDetailId] = useState<string | null>(null)
+  const [appealDetailId, setAppealDetailId] = useState<string | null>(null)
+  const openNotificationTarget = (item: any) => {
+    if (item.targetType === 'creator_task_appeal' && item.targetId) {
+      setAppealDetailId(item.targetId)
+      setPage('creator')
+      return
+    }
+    if (item.targetType === 'creator_task' && item.targetId) {
+      setTaskDetailId(item.targetId)
+      setPage('creator')
+      return
+    }
+    if (item.targetType === 'creator_task_payout' && item.metadata?.creatorTaskId) {
+      setTaskDetailId(item.metadata.creatorTaskId)
+      setPage('creator')
+      return
+    }
+    message.info('该通知暂无可查看的业务详情。')
+  }
   return (
     <Layout className="portal">
       <Sider breakpoint="lg" collapsedWidth="0" className="portal-sider">
@@ -132,11 +152,11 @@ function Portal({ onLogout }: { onLogout: () => void }) {
         </Header>
         <Content className="portal-content">
           {page === 'overview' && <Overview />}
-          {page === 'creator' && <CreatorWorkspace />}
+          {page === 'creator' && <CreatorWorkspace initialTaskId={taskDetailId} initialAppealId={appealDetailId} onTaskOpened={() => setTaskDetailId(null)} onAppealOpened={() => setAppealDetailId(null)} />}
           {page === 'content' && <Contents />}
           {page === 'income' && <Income />}
           {page === 'platforms' && <Platforms />}
-          {page === 'notifications' && <Notifications />}
+          {page === 'notifications' && <Notifications onOpenTarget={openNotificationTarget} />}
         </Content>
       </Layout>
     </Layout>
@@ -576,7 +596,7 @@ function Platforms() {
     </>
   )
 }
-function Notifications() {
+function Notifications({ onOpenTarget }: { onOpenTarget: (item: any) => void }) {
   const notifications = useQuery({
     queryKey: ['agent-notifications'],
     queryFn: () => api<any>('/notifications?page=1&pageSize=50'),
@@ -622,7 +642,11 @@ function Notifications() {
                   <Button type="link" onClick={() => markRead(item.id)}>
                     标记已读
                   </Button>
-                ),
+              ),
+            },
+            {
+              title: '操作',
+              render: (_, item: any) => item.targetType && item.targetId ? <Button type="link" onClick={() => onOpenTarget(item)}>查看详情</Button> : '—',
             },
           ]}
           locale={{ emptyText: '暂无通知' }}

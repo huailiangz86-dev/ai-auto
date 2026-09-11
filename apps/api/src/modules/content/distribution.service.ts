@@ -17,6 +17,7 @@ import { CopywritingService } from './copywriting.service'
 import { VideoService } from './video.service'
 import { PosterService } from './poster.service'
 import { KuaishouService } from './kuaishou.service'
+import { DouyinService } from './douyin.service'
 
 export interface DistributeContentDto {
   contentId: string
@@ -54,6 +55,7 @@ export class DistributionService {
     private readonly videoService: VideoService,
     private readonly posterService: PosterService,
     private readonly kuaishouService: KuaishouService,
+    private readonly douyinService: DouyinService,
   ) {}
 
   // ========================
@@ -143,6 +145,7 @@ export class DistributionService {
         id: true,
         agentId: true,
         platformType: true,
+        platformUserId: true,
         status: true,
         accessToken: true,
       },
@@ -174,6 +177,22 @@ export class DistributionService {
         formattedContent: contentText,
         isManual: true,
         error: null,
+      }
+    }
+
+    // P0 仅对已经取得发布权限并完成适配的平台自动发布；其他已绑定平台
+    // 仍明确返回手动发布内容，绝不伪造已发布记录。
+    if (![PlatformType.DOUYIN, PlatformType.KUAISHOU].includes(platform)) {
+      await this.publicationRepo.update(
+        { id: publication.id },
+        { status: PublicationStatus.MANUAL },
+      )
+      return {
+        platform: platform.toString(),
+        status: PublicationStatus.MANUAL,
+        formattedContent: contentText,
+        isManual: true,
+        error: '该平台暂未开通自动发布，已提供可复制的发布内容',
       }
     }
 
@@ -408,23 +427,27 @@ export class DistributionService {
       return { postId: result.photoId, postUrl: result.playUrl, pending: result.pending }
     }
 
-    // TODO: 实现各平台 API 发布逻辑
-    // - 微信：企业微信 / 公众号 API
-    // - 抖音：抖音开放平台 API
-    // - 小红书：蒲公英平台 API
-    // - 视频号：微信开放平台 API
-
-    // 占位：返回模拟结果
-    this.logger.log({
-      event: 'platform_api_publish_placeholder',
-      agentId,
-      platform: platform.toString(),
-      contentType: content.contentType,
-    })
-
-    return {
-      postId: `mock-${platform.toString()}-${Date.now()}`,
-      postUrl: `https://${platform.toString()}.example.com/post/mock`,
+    if (platform === PlatformType.DOUYIN) {
+      if (content.contentType !== 'video') {
+        throw new BadRequestException('抖音开放接口当前仅支持视频内容自动发布')
+      }
+      if (!platformAccount.accessToken || !platformAccount.platformUserId) {
+        throw new BadRequestException('抖音账号未授权或缺少 open_id')
+      }
+      const data = content.contentData ?? {}
+      const videoUrl = String(data['video_url'] ?? data['videoUrl'] ?? '')
+      if (!videoUrl) throw new BadRequestException('抖音发布需要已生成的 HTTPS 视频地址')
+      const result = await this.douyinService.uploadAndPublish({
+        accessToken: platformAccount.accessToken,
+        openId: platformAccount.platformUserId,
+        videoPath: videoUrl,
+        title: String(data['title'] ?? 'AI auto 推广视频'),
+        description: this.ensureTrackingUrl(contentText, content.trackingUrl),
+      })
+      if (result.errorCode) throw new BadRequestException(result.errorMsg ?? '抖音发布失败')
+      return { postId: result.videoId, postUrl: result.videoUrl }
     }
+
+    throw new BadRequestException(`${platform.toString()} 尚未提供可用的自动发布接口，请使用手动发布`)
   }
 }

@@ -15,7 +15,7 @@
       ><view><text class="creation-title">🎁 分享挑战</text><text class="creation-subtitle">攒积分、开盲盒、冲排行榜</text></view
       ><text class="arrow">›</text></view
     ><view class="menu"
-      ><view class="menu-item" @tap="privacy"><text>隐私设置</text><text>›</text></view
+      ><view class="menu-item" @tap="privacy"><text>隐私设置与数据导出</text><text>›</text></view
       ><view class="menu-item"><text>关于 AI auto</text><text>›</text></view
       ><view v-if="auth.isLoggedIn" class="menu-item danger" @tap="logout"
         ><text>退出登录</text><text>›</text></view
@@ -45,11 +45,11 @@ function goGamification() {
   uni.navigateTo({ url: '/pages/gamification/index' })
 }
 function privacy() {
-  uni.showModal({
-    title: '隐私设置',
-    content: '我们仅在你授权后获取定位信息，用于排序附近优惠。你可以在微信设置中随时关闭授权。',
-    showCancel: false,
-  })
+  if (!auth.isLoggedIn) {
+    goLogin()
+    return
+  }
+  uni.navigateTo({ url: '/pages/privacy/index' })
 }
 function logout() {
   auth.clearSession()

@@ -9,6 +9,14 @@
       "style": { "navigationBarTitleText": "优惠详情" }
     },
     {
+      "path": "pages/coupons/index",
+      "style": { "navigationBarTitleText": "券包" }
+    },
+    {
+      "path": "pages/wallet/index",
+      "style": { "navigationBarTitleText": "推广钱包" }
+    },
+    {
       "path": "pages/redemption/index",
       "style": { "navigationBarTitleText": "出示优惠券" }
     },
@@ -19,6 +27,14 @@
     {
       "path": "pages/profile/index",
       "style": { "navigationBarTitleText": "我的" }
+    },
+    {
+      "path": "pages/privacy/index",
+      "style": { "navigationBarTitleText": "隐私与数据导出" }
+    },
+    {
+      "path": "pages/search/index",
+      "style": { "navigationBarTitleText": "搜索优惠" }
     },
     {
       "path": "pages/ai-creation/index",

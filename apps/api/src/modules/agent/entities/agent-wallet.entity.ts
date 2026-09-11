@@ -46,6 +46,20 @@ export class AgentWallet extends BaseEntity {
   @Column({ name: 'total_withdrawn', type: 'decimal', precision: 14, scale: 2, default: 0 })
   totalWithdrawn!: number
 
+  // A recovery receivable is created only when an already withdrawn settlement
+  // cannot be fully offset from the available balance at adjudication time.
+  @Column({
+    name: 'recovery_receivable_balance',
+    type: 'decimal',
+    precision: 14,
+    scale: 2,
+    default: 0,
+  })
+  recoveryReceivableBalance!: number
+
+  @Column({ name: 'total_recovered', type: 'decimal', precision: 14, scale: 2, default: 0 })
+  totalRecovered!: number
+
   // ---- Last Settlement ----
   @Column({ name: 'last_settlement_at', type: 'timestamptz', nullable: true })
   lastSettlementAt?: Date | null

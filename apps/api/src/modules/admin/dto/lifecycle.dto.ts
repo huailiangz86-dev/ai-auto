@@ -1,8 +1,10 @@
-import { IsArray, IsDateString, IsIn, IsInt, IsNotEmpty, IsOptional, IsString, MaxLength, Min } from 'class-validator'
+import { AuditStatus } from '@ai-auto/shared'
+import { IsArray, IsDateString, IsEnum, IsIn, IsInt, IsNotEmpty, IsOptional, IsString, MaxLength, Min } from 'class-validator'
 
 export class ListLifecycleSubjectsDto {
   @IsOptional() @IsString() keyword?: string
   @IsOptional() @IsString() status?: string
+  @IsOptional() @IsEnum(AuditStatus) auditStatus?: AuditStatus
   @IsOptional() @IsIn(['professional_creator', 'ordinary_user']) agentType?: 'professional_creator' | 'ordinary_user'
   @IsOptional() @IsInt() @Min(1) page: number = 1
   @IsOptional() @IsInt() @Min(1) pageSize: number = 20

@@ -39,6 +39,8 @@ describe('CreatorPortalService operations appeals', () => {
   let tasks: ReturnType<typeof createRepo>
   let payouts: ReturnType<typeof createRepo>
   let appeals: ReturnType<typeof createRepo>
+  let wallets: ReturnType<typeof createRepo>
+  let ledgerEntries: { find: jest.Mock; save: jest.Mock }
   let dataSource: any
   let manager: any
 
@@ -100,15 +102,16 @@ describe('CreatorPortalService operations appeals', () => {
     const allocations = createRepo()
     payouts = createRepo()
     appeals = createRepo()
-    const wallets = createRepo()
+    wallets = createRepo()
     manager = {
       findOne: jest.fn(),
       save: jest.fn((entityOrValue, maybeValue) => Promise.resolve(maybeValue ?? entityOrValue)),
       create: jest.fn((_: unknown, value: unknown) => value),
     }
+    ledgerEntries = { find: jest.fn().mockResolvedValue([]), save: jest.fn() }
     dataSource = {
       transaction: jest.fn((fn: (transactionManager: any) => Promise<unknown>) => fn(manager)),
-      getRepository: jest.fn(() => ({ save: jest.fn() })),
+      getRepository: jest.fn(() => ledgerEntries),
     }
 
     const module = await Test.createTestingModule({
@@ -167,6 +170,25 @@ describe('CreatorPortalService operations appeals', () => {
     })
   })
 
+  it('scopes direct appeal detail to the current creator or merchant', async () => {
+    appeals.findOne.mockResolvedValue({ ...appeal, merchantId: 'merchant-1' })
+    tasks.find.mockResolvedValue([task])
+    payouts.find.mockResolvedValue([payout])
+    creators.find.mockResolvedValue([creator])
+
+    const creatorDetail = await service.appealDetailForCreator('creator-1', 'appeal-1')
+    const merchantDetail = await service.appealDetailForMerchant('merchant-1', 'appeal-1')
+
+    expect(appeals.findOne).toHaveBeenNthCalledWith(1, {
+      where: { id: 'appeal-1', creatorId: 'creator-1' },
+    })
+    expect(appeals.findOne).toHaveBeenNthCalledWith(2, {
+      where: { id: 'appeal-1', merchantId: 'merchant-1' },
+    })
+    expect(creatorDetail.appealId).toBe('appeal-1')
+    expect(merchantDetail.appealId).toBe('appeal-1')
+  })
+
   it('resolves an open appeal with immutable audit and creator notification', async () => {
     manager.findOne.mockImplementation((entity: unknown) => {
       if (entity === CreatorTaskAppeal) return Promise.resolve({ ...appeal })
@@ -222,6 +244,104 @@ describe('CreatorPortalService operations appeals', () => {
       ),
     ).rejects.toBeInstanceOf(BadRequestException)
     expect(manager.save).not.toHaveBeenCalled()
+  })
+
+  it('allows a merchant to appeal a completed task during the 30 calendar-day window', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-09-20T08:00:00Z'))
+    const completedTask = { ...task, stateChangedAt: new Date('2026-09-01T08:00:00Z') }
+    tasks.findOne.mockResolvedValueOnce(completedTask)
+    payouts.findOne.mockResolvedValueOnce(null)
+    appeals.findOne.mockResolvedValueOnce(null)
+
+    const result = await service.appealForMerchant('merchant-1', 'task-1', {
+      target: 'task',
+      reason: '交付内容未满足约定要求。',
+    })
+
+    expect(result).toMatchObject({
+      creatorTaskId: 'task-1',
+      merchantId: 'merchant-1',
+      appellantType: 'merchant',
+      target: 'task',
+      appealDeadlineAt: new Date('2026-10-01T08:00:00Z'),
+    })
+    expect(appeals.save).toHaveBeenCalledWith(
+      expect.objectContaining({ appellantType: 'merchant', merchantId: 'merchant-1' }),
+    )
+    jest.useRealTimers()
+  })
+
+  it('rejects an appeal after the 30 calendar-day window expires', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-10-02T08:00:00Z'))
+    tasks.findOne.mockResolvedValueOnce({
+      ...task,
+      stateChangedAt: new Date('2026-09-01T08:00:00Z'),
+    })
+    payouts.findOne.mockResolvedValueOnce(null)
+
+    await expect(
+      service.appealForMerchant('merchant-1', 'task-1', {
+        target: 'task',
+        reason: '逾期申诉应被拒绝。',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException)
+    expect(appeals.save).not.toHaveBeenCalled()
+    jest.useRealTimers()
+  })
+
+  it('lists outstanding recovery receivables by adjudication with linked offset records', async () => {
+    appeals.find.mockResolvedValueOnce([{
+      id: 'appeal-recovery-1', creatorId: 'creator-1', creatorTaskId: 'task-1', payoutId: 'payout-1',
+      merchantId: 'merchant-1', status: 'accepted', adjudicationDecision: 'reverse_settlement',
+      recoveryAmount: 100, recoveryRecoveredAmount: 70, resolvedAt: new Date('2026-08-01T08:00:00Z'),
+      createdAt: new Date('2026-08-01T08:00:00Z'),
+    }])
+    ledgerEntries.find.mockResolvedValueOnce([{
+      id: 'ledger-offset-1', entryType: 'recovery_auto_offset', amount: -70,
+      occurredAt: new Date('2026-08-15T08:00:00Z'),
+      metadata: { appealId: 'appeal-recovery-1', settlementPayoutId: 'payout-later-1' },
+    }])
+    wallets.find.mockResolvedValueOnce([{
+      agentId: 'creator-1', recoveryReceivableBalance: 30, settledBalance: 0, pendingSettlementBalance: 10,
+    }])
+    creators.find.mockResolvedValueOnce([creator])
+
+    const result = await service.listRecoveryReceivables({ page: 1, pageSize: 20 })
+
+    expect(result).toMatchObject({
+      items: [{
+        appealId: 'appeal-recovery-1', creatorId: 'creator-1', remainingAmount: 30, recoveredAmount: 70,
+        offsets: [{ ledgerEntryId: 'ledger-offset-1', settlementPayoutId: 'payout-later-1' }],
+        creator: { nickname: '小美妈妈', phone: '138****5678' },
+      }],
+      pagination: { total: 1 },
+    })
+    expect(appeals.find).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ adjudicationDecision: 'reverse_settlement' }) }),
+    )
+  })
+
+  it('reconciles wallet receivables and settlement-offset ledger entries every day', async () => {
+    wallets.find.mockResolvedValueOnce([
+      { agentId: 'creator-1', recoveryReceivableBalance: 30 },
+    ])
+    appeals.find.mockResolvedValueOnce([{
+      id: 'appeal-recovery-1', creatorId: 'creator-1', status: 'accepted',
+      adjudicationDecision: 'reverse_settlement', recoveryAmount: 100, recoveryRecoveredAmount: 70,
+    }])
+    ledgerEntries.find.mockResolvedValueOnce([{
+      id: 'ledger-offset-1', entryType: 'recovery_auto_offset', amount: -70,
+      metadata: { appealId: 'appeal-recovery-1', settlementPayoutId: 'payout-later-1' },
+    }])
+    payouts.find.mockResolvedValueOnce([{ id: 'payout-later-1', recoveryOffsetAmount: 70 }])
+
+    await expect(service.recoveryReconciliation()).resolves.toMatchObject({
+      walletReceivable: 30,
+      adjudicationReceivable: 30,
+      receivableDifference: 0,
+      receivableMatches: true,
+      settlementOffsets: { checkedPayouts: 1, matches: true, mismatches: [] },
+    })
   })
 
   it('does not verify a payout that is on risk hold', async () => {

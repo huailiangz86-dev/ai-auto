@@ -15,6 +15,7 @@ export const CREATOR_TASK_STATUSES = [
   'tracking',
   'completed',
   'settled',
+  'declined',
   'rejected',
   'expired',
   'cancelled',

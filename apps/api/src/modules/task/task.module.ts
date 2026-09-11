@@ -20,7 +20,11 @@ import {
   CreatorTaskController,
   MerchantGrowthTaskController,
 } from './growth-task.controller'
-import { AdminCreatorPayoutController, CreatorPortalController } from './creator-portal.controller'
+import {
+  AdminCreatorPayoutController,
+  CreatorPortalController,
+  MerchantTaskAppealController,
+} from './creator-portal.controller'
 import { MerchantGrowthPlanController } from './growth-plan.controller'
 import { GrowthTaskService } from './growth-task.service'
 import { GrowthPlanService } from './growth-plan.service'
@@ -84,6 +88,7 @@ import { CustomerAttribution } from '../customer/entities/customer-attribution.e
     CreatorTaskController,
     AdminCreatorTaskController,
     CreatorPortalController,
+    MerchantTaskAppealController,
     AdminCreatorPayoutController,
   ],
   providers: [

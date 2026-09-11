@@ -73,6 +73,33 @@ async def test_non_text_moderation_is_not_reported_as_a_false_pass() -> None:
     assert error.value.status_code == 501
 
 
+@pytest.mark.asyncio
+async def test_batch_moderation_keeps_successful_items_when_one_item_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_moderate(request: moderation.ModerationRequest) -> moderation.ModerationResponse:
+        if request.content == "bad":
+            raise HTTPException(status_code=422, detail="bad content")
+        return moderation.ModerationResponse(
+            request_id="request-1",
+            content_type="text",
+            result=moderation.ModerationResult(
+                passed=True, score=0.1, action="pass", message="ok"
+            ),
+            model="test",
+            processing_time_ms=0,
+        )
+
+    monkeypatch.setattr(moderation, "moderate_content", fake_moderate)
+    response = await moderation.moderate_batch([
+        moderation.ModerationRequest(content_type="text", content="good"),
+        moderation.ModerationRequest(content_type="text", content="bad"),
+    ])
+
+    assert response.total_processed == 2
+    assert response.total_failed == 1
+    assert response.results[0].result.passed is True
+    assert response.results[1]["status_code"] == 422
+
+
 def test_seedance_helpers_protect_provider_details() -> None:
     assert content._video_status("queued") == "generating"
     assert content._video_status("running") == "generating"

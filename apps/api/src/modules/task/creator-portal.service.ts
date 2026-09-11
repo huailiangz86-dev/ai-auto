@@ -1,14 +1,16 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { AuditActionType, AuditStatus, UserRole } from '@ai-auto/shared'
-import { DataSource, In, Repository } from 'typeorm'
+import { DataSource, In, MoreThan, Repository } from 'typeorm'
 import { AuditLog } from '../admin/entities/audit-log.entity'
+import { FinancialLedgerEntry } from '../admin/entities/financial-ledger-entry.entity'
 import { AgentWallet } from '../agent/entities/agent-wallet.entity'
 import { SharingAgent } from '../agent/entities/sharing-agent.entity'
 import { Notification } from '../notification/entities/notification.entity'
 import {
   CreateCreatorTaskAppealDto,
   CreatorTaskListQueryDto,
+  ListRecoveryReceivablesDto,
   ListCreatorTaskAppealsDto,
   ResolveCreatorTaskAppealDto,
   SubmitCreatorVerificationDto,
@@ -18,6 +20,8 @@ import {
 import { CampaignBudgetAllocation } from './entities/campaign-budget-allocation.entity'
 import {
   CreatorTaskAppeal,
+  CreatorTaskAppealAppellantType,
+  CreatorTaskAppealDecision,
   CreatorTaskAppealStatus,
   CreatorTaskPayout,
 } from './entities/creator-task-payout.entity'
@@ -135,6 +139,8 @@ export class CreatorPortalService {
           pending: Number(wallet?.pendingSettlementBalance ?? 0),
           available: Number(wallet?.settledBalance ?? 0),
           frozen: Number(wallet?.frozenBalance ?? 0),
+          recoveryReceivable: Number(wallet?.recoveryReceivableBalance ?? 0),
+          totalRecovered: Number(wallet?.totalRecovered ?? 0),
         },
       },
       openAppealCount: appeals,
@@ -143,35 +149,300 @@ export class CreatorPortalService {
   async appeal(creatorId: string, taskId: string, dto: CreateCreatorTaskAppealDto) {
     const task = await this.tasks.findOne({ where: { id: taskId, creatorId } })
     if (!task) throw new NotFoundException('创作者任务不存在')
-    const payout = await this.payouts.findOne({ where: { creatorTaskId: taskId } })
-    if (dto.target === 'payout' && !payout) throw new BadRequestException('该任务尚未生成报酬记录')
+    return this.createAppeal(task, 'creator', dto)
+  }
+  async appealForMerchant(merchantId: string, taskId: string, dto: CreateCreatorTaskAppealDto) {
+    const task = await this.tasks.findOne({ where: { id: taskId, merchantId } })
+    if (!task) throw new NotFoundException('创作者任务不存在')
+    return this.createAppeal(task, 'merchant', dto)
+  }
+  private async createAppeal(
+    task: CreatorTask,
+    appellantType: CreatorTaskAppealAppellantType,
+    dto: CreateCreatorTaskAppealDto,
+  ) {
+    const payout = await this.payouts.findOne({ where: { creatorTaskId: task.id } })
+    const appealDeadlineAt = this.appealDeadline(task, payout, dto.target)
+    if (new Date() > appealDeadlineAt)
+      throw new BadRequestException('申诉期限已过：任务完成或结算完成后仅可在 30 个自然日内申诉')
     const openAppeal = await this.appeals.findOne({
-      where: { creatorTaskId: taskId, creatorId, target: dto.target, status: 'open' },
+      where: { creatorTaskId: task.id, appellantType, target: dto.target, status: 'open' },
     })
     if (openAppeal) throw new BadRequestException('该任务已有相同类型的待处理申诉')
     const appeal = await this.appeals.save(
       this.appeals.create({
-        creatorTaskId: taskId,
-        creatorId,
+        creatorTaskId: task.id,
+        creatorId: task.creatorId,
+        merchantId: task.merchantId,
         payoutId: payout?.id ?? null,
+        appellantType,
         target: dto.target,
+        appealDeadlineAt,
         reason: dto.reason,
         evidence: dto.evidence ?? {},
         status: 'open',
       }),
     )
-    await this.audit(
-      creatorId,
-      AuditActionType.CREATOR_TASK_APPEALED,
-      'creator_task_appeal',
-      appeal.id,
-      { taskId, target: dto.target },
-    )
+    const actorId = appellantType === 'creator' ? task.creatorId : task.merchantId
+    await this.dataSource.getRepository(AuditLog).save({
+      actorType: appellantType,
+      actorId,
+      actionType:
+        appellantType === 'creator'
+          ? AuditActionType.CREATOR_TASK_APPEALED
+          : AuditActionType.MERCHANT_TASK_APPEALED,
+      actionDescription: 'creator_task_appealed',
+      targetType: 'creator_task_appeal',
+      targetId: appeal.id,
+      metadata: { creatorTaskId: task.id, target: dto.target, appealDeadlineAt },
+      result: 'success',
+    })
+    await this.dataSource.getRepository(Notification).save({
+      recipientId: appellantType === 'creator' ? task.merchantId : task.creatorId,
+      recipientRole: appellantType === 'creator' ? UserRole.MERCHANT_ADMIN : UserRole.AGENT,
+      type: 'creator_task_appeal_created',
+      title: appellantType === 'creator' ? '创作者发起了任务申诉' : '商户发起了任务申诉',
+      body: `对方已就${dto.target === 'payout' ? '任务结算' : '任务履约'}发起申诉，运营将进行处理。`,
+      targetType: 'creator_task_appeal',
+      targetId: appeal.id,
+      metadata: { creatorTaskId: task.id, target: dto.target, appealDeadlineAt },
+    })
     return appeal
   }
   async listAppeals(creatorId: string) {
+    const appeals = await this.appeals.find({ where: { creatorId }, order: { createdAt: 'DESC' } })
     return {
-      items: await this.appeals.find({ where: { creatorId }, order: { createdAt: 'DESC' } }),
+      items: await this.enrichAppeals(appeals),
+    }
+  }
+  async listAppealsForMerchant(merchantId: string) {
+    const appeals = await this.appeals.find({ where: { merchantId }, order: { createdAt: 'DESC' } })
+    return {
+      items: await this.enrichAppeals(appeals),
+    }
+  }
+  async appealDetailForCreator(creatorId: string, appealId: string) {
+    return this.appealDetail({ id: appealId, creatorId })
+  }
+  async appealDetailForMerchant(merchantId: string, appealId: string) {
+    return this.appealDetail({ id: appealId, merchantId })
+  }
+  private async appealDetail(where: { id: string; creatorId?: string; merchantId?: string }) {
+    const appeal = await this.appeals.findOne({ where })
+    if (!appeal) throw new NotFoundException('申诉不存在或无权查看')
+    return (await this.enrichAppeals([appeal]))[0]
+  }
+  async listRecoveryReceivables(query: ListRecoveryReceivablesDto = {}) {
+    const page = Math.max(Number(query.page ?? 1) || 1, 1)
+    const pageSize = Math.min(Math.max(Number(query.pageSize ?? 20) || 20, 1), 100)
+    // A wallet can contain receivables from several rulings. Operations must
+    // work from the ruling, otherwise an operator cannot explain which payout
+    // cleared which debt.
+    const appeals = (await this.appeals.find({
+      where: {
+        status: 'accepted',
+        adjudicationDecision: 'reverse_settlement',
+        ...(query.creatorId ? { creatorId: query.creatorId } : {}),
+      },
+      order: { resolvedAt: 'ASC', createdAt: 'ASC' },
+    })).filter(
+      (appeal) =>
+        this.money(Number(appeal.recoveryAmount ?? 0) - Number(appeal.recoveryRecoveredAmount ?? 0)) >
+        0,
+    )
+    const sourceReferences = appeals.map((appeal) => `appeal:${appeal.id}`)
+    const financialEntries = sourceReferences.length
+      ? await this.dataSource.getRepository(FinancialLedgerEntry).find({
+          where: { entryType: 'recovery_auto_offset', sourceReference: In(sourceReferences) },
+          order: { occurredAt: 'DESC', createdAt: 'DESC' },
+        })
+      : []
+    const entriesByAppealId = new Map<string, FinancialLedgerEntry[]>()
+    for (const entry of financialEntries) {
+      const appealId = String((entry.metadata ?? {}).appealId ?? '')
+      if (!appealId) continue
+      entriesByAppealId.set(appealId, [...(entriesByAppealId.get(appealId) ?? []), entry])
+    }
+    const wallets = appeals.length
+      ? await this.wallets.find({ where: { agentId: In(appeals.map((appeal) => appeal.creatorId)) } })
+      : []
+    const creators = appeals.length
+      ? await this.creators.find({ where: { id: In(appeals.map((appeal) => appeal.creatorId)) } })
+      : []
+    const creatorById = new Map(creators.map((creator) => [creator.id, creator]))
+    const walletByCreatorId = new Map(wallets.map((wallet) => [wallet.agentId, wallet]))
+    const items = appeals
+      .map((appeal) => {
+        const offsets = entriesByAppealId.get(appeal.id) ?? []
+        const lastOffsetAt = offsets.reduce<Date | null>((latest, entry) => {
+          if (!latest || new Date(entry.occurredAt) > latest) return new Date(entry.occurredAt)
+          return latest
+        }, null)
+        const risk = this.recoveryRisk(appeal.resolvedAt ?? appeal.createdAt, lastOffsetAt)
+        const creator = creatorById.get(appeal.creatorId)
+        const wallet = walletByCreatorId.get(appeal.creatorId)
+        const remaining = this.money(
+          Number(appeal.recoveryAmount ?? 0) - Number(appeal.recoveryRecoveredAmount ?? 0),
+        )
+        return {
+          appealId: appeal.id,
+          creatorId: appeal.creatorId,
+          creatorTaskId: appeal.creatorTaskId,
+          payoutId: appeal.payoutId ?? null,
+          merchantId: appeal.merchantId,
+          resolvedAt: appeal.resolvedAt ?? null,
+          recoveryAmount: Number(appeal.recoveryAmount ?? 0),
+          recoveredAmount: Number(appeal.recoveryRecoveredAmount ?? 0),
+          remainingAmount: remaining,
+          lastOffsetAt,
+          daysWithoutOffset: risk.daysWithoutOffset,
+          risk,
+          offsets: offsets.map((entry) => ({
+            ledgerEntryId: entry.id,
+            amount: this.money(Math.abs(Number(entry.amount))),
+            occurredAt: entry.occurredAt,
+            settlementPayoutId: String((entry.metadata ?? {}).settlementPayoutId ?? '') || null,
+          })),
+          wallet: wallet
+            ? {
+                recoveryReceivableAmount: Number(wallet.recoveryReceivableBalance ?? 0),
+                availableBalance: Number(wallet.settledBalance ?? 0),
+                pendingSettlementBalance: Number(wallet.pendingSettlementBalance ?? 0),
+              }
+            : null,
+          creator: creator
+            ? {
+                nickname: creator.nickname ?? null,
+                phone: this.maskPhone(creator.phone),
+                realNameVerified: creator.realNameVerified,
+                auditStatus: creator.auditStatus,
+              }
+            : null,
+        }
+      })
+      .filter((item) => query.riskLevel === 'all' || !query.riskLevel || item.risk.level === query.riskLevel)
+      .sort((left, right) => right.daysWithoutOffset - left.daysWithoutOffset)
+    const total = items.length
+    return {
+      items: items.slice((page - 1) * pageSize, page * pageSize),
+      summary: items.reduce(
+        (summary, item) => {
+          summary[item.risk.level]++
+          summary.outstandingAmount = this.money(summary.outstandingAmount + item.remainingAmount)
+          return summary
+        },
+        { normal: 0, watch: 0, overdue: 0, critical: 0, outstandingAmount: 0 },
+      ),
+      pagination: { page, pageSize, total, totalPages: Math.ceil(total / pageSize) },
+      policy: {
+        offset: '后续已核验报酬在结算时优先抵扣待追回款，仅剩余金额进入创作者可用余额。',
+        thresholds: { watchDays: 7, overdueDays: 30, criticalDays: 60 },
+        automatedAction: '无；暂停提现、人工协商和核销均需人工按已审批规则处理。',
+      },
+    }
+  }
+
+  async recoveryReconciliation() {
+    const [wallets, recoveryAppeals, offsetEntries] = await Promise.all([
+      this.wallets.find({ where: { recoveryReceivableBalance: MoreThan(0) } }),
+      this.appeals.find({
+        where: { status: 'accepted', adjudicationDecision: 'reverse_settlement' },
+      }),
+      this.dataSource.getRepository(FinancialLedgerEntry).find({
+        where: { entryType: 'recovery_auto_offset' },
+      }),
+    ])
+    const outstandingAppeals = recoveryAppeals.filter(
+      (appeal) =>
+        this.money(Number(appeal.recoveryAmount ?? 0) - Number(appeal.recoveryRecoveredAmount ?? 0)) >
+        0,
+    )
+    const expectedReceivable = this.money(
+      outstandingAppeals.reduce(
+        (total, appeal) =>
+          total + Number(appeal.recoveryAmount ?? 0) - Number(appeal.recoveryRecoveredAmount ?? 0),
+        0,
+      ),
+    )
+    const walletReceivable = this.money(
+      wallets.reduce((total, wallet) => total + Number(wallet.recoveryReceivableBalance ?? 0), 0),
+    )
+    const settlementPayoutIds = [
+      ...new Set(
+        offsetEntries
+          .map((entry) => String((entry.metadata ?? {}).settlementPayoutId ?? ''))
+          .filter(Boolean),
+      ),
+    ]
+    const payouts = settlementPayoutIds.length
+      ? await this.payouts.find({ where: { id: In(settlementPayoutIds) } })
+      : []
+    const payoutById = new Map(payouts.map((payout) => [payout.id, payout]))
+    const offsetByPayoutId = new Map<string, number>()
+    for (const entry of offsetEntries) {
+      const payoutId = String((entry.metadata ?? {}).settlementPayoutId ?? '')
+      if (!payoutId) continue
+      offsetByPayoutId.set(
+        payoutId,
+        this.money((offsetByPayoutId.get(payoutId) ?? 0) + Math.abs(Number(entry.amount))),
+      )
+    }
+    const offsetMismatches = [...offsetByPayoutId.entries()]
+      .map(([payoutId, recordedOffset]) => ({
+        payoutId,
+        recordedOffset,
+        payoutOffset: Number(payoutById.get(payoutId)?.recoveryOffsetAmount ?? 0),
+      }))
+      .filter((item) => this.money(item.recordedOffset) !== this.money(item.payoutOffset))
+    return {
+      reconciledAt: new Date(),
+      walletReceivable,
+      adjudicationReceivable: expectedReceivable,
+      receivableDifference: this.money(walletReceivable - expectedReceivable),
+      receivableMatches: walletReceivable === expectedReceivable,
+      outstandingAdjudications: outstandingAppeals.length,
+      settlementOffsets: {
+        checkedPayouts: offsetByPayoutId.size,
+        matches: offsetMismatches.length === 0,
+        mismatches: offsetMismatches,
+      },
+    }
+  }
+  async listAppealableTasksForMerchant(merchantId: string) {
+    const tasks = await this.tasks.find({
+      where: { merchantId, status: 'completed' },
+      order: { updatedAt: 'DESC' },
+    })
+    if (!tasks.length) return { items: [] }
+    const payouts = await this.payouts.find({
+      where: { creatorTaskId: In(tasks.map((task) => task.id)) },
+    })
+    const payoutsByTask = new Map(payouts.map((payout) => [payout.creatorTaskId, payout]))
+    const now = new Date()
+    return {
+      items: tasks
+        .map((task) => {
+          const payout = payoutsByTask.get(task.id) ?? null
+          const taskAppealDeadlineAt = this.appealDeadline(task, payout, 'task')
+          const payoutAppealDeadlineAt =
+            payout?.status === 'settled' && payout.settledAt
+              ? this.appealDeadline(task, payout, 'payout')
+              : null
+          return {
+            creatorTaskId: task.id,
+            creatorId: task.creatorId,
+            brief: task.brief,
+            channel: task.channel,
+            contentType: task.contentType,
+            completedAt: task.stateChangedAt ?? task.updatedAt,
+            payout: this.payout(payout ?? undefined),
+            taskAppealDeadlineAt,
+            payoutAppealDeadlineAt,
+            taskAppealable: now <= taskAppealDeadlineAt,
+            payoutAppealable: payoutAppealDeadlineAt ? now <= payoutAppealDeadlineAt : false,
+          }
+        })
+        .filter((item) => item.taskAppealable || item.payoutAppealable),
     }
   }
 
@@ -198,7 +469,10 @@ export class CreatorPortalService {
     dto: ResolveCreatorTaskAppealDto,
   ) {
     const appeal = await this.dataSource.transaction(async (manager) => {
-      const current = await manager.findOne(CreatorTaskAppeal, { where: { id: appealId } })
+      const current = await manager.findOne(CreatorTaskAppeal, {
+        where: { id: appealId },
+        lock: { mode: 'pessimistic_write' },
+      })
       if (!current) throw new NotFoundException('创作者任务申诉不存在')
       if (current.status !== 'open')
         throw new BadRequestException(`该申诉已处理（${current.status}）`)
@@ -208,22 +482,99 @@ export class CreatorPortalService {
           ? manager.findOne(CreatorTaskPayout, { where: { id: current.payoutId } })
           : manager.findOne(CreatorTaskPayout, { where: { creatorTaskId: current.creatorTaskId } }),
       ])
+      const decision = this.normalizeAdjudicationDecision(dto.decision)
+      if ((decision === 'adjust_payout' || decision === 'reverse_settlement') && !payout)
+        throw new BadRequestException('该申诉没有可裁决的报酬记录')
+      const amountBefore = this.money(
+        Number(payout?.adjudicatedAmount ?? payout?.verifiedAmount ?? 0),
+      )
+      let amountAfter = amountBefore
+      const financialLedgerEntryIds: string[] = []
+      if (decision === 'adjust_payout') {
+        if (dto.adjustedAmount === undefined)
+          throw new BadRequestException('调整报酬时必须填写调整后金额')
+        amountAfter = this.money(Number(dto.adjustedAmount))
+        this.assertConfirmedAmount(dto.confirmedAmount, amountAfter, '调整后金额')
+        const delta = this.money(amountAfter - amountBefore)
+        await this.applyPayoutAdjustment(manager, payout!, delta)
+        payout!.adjudicatedAmount = amountAfter
+        payout!.adjudicatedAt = new Date()
+        await manager.save(payout!)
+        if (delta !== 0) {
+          const entry = await this.recordAdjudicationLedger(manager, {
+            appeal: current,
+            payout: payout!,
+            actorId: actor.id,
+            amount: delta,
+            entryType: 'appeal_payout_adjustment',
+            description: '申诉裁决：调整创作者履约报酬',
+            amountBefore,
+            amountAfter,
+          })
+          financialLedgerEntryIds.push(entry.id)
+        }
+      }
+      if (decision === 'reverse_settlement') {
+        if (!['verified', 'settled'].includes(payout!.status))
+          throw new BadRequestException('仅已核验或已结算的报酬可撤销/追回')
+        this.assertConfirmedAmount(dto.confirmedAmount, amountBefore, '追回金额')
+        const recoveredNow = await this.reversePayout(manager, payout!, amountBefore)
+        payout!.adjudicatedAmount = 0
+        payout!.adjudicatedAt = new Date()
+        payout!.status = 'reversed'
+        await manager.save(payout!)
+        amountAfter = 0
+        current.recoveryAmount = amountBefore
+        current.recoveryRecoveredAmount = recoveredNow
+        current.recoveryCompletedAt = recoveredNow >= amountBefore ? new Date() : null
+        if (amountBefore !== 0) {
+          const entry = await this.recordAdjudicationLedger(manager, {
+            appeal: current,
+            payout: payout!,
+            actorId: actor.id,
+            amount: -amountBefore,
+            entryType: 'appeal_payout_reversal',
+            description: '申诉裁决：撤销/追回创作者结算',
+            amountBefore,
+            amountAfter,
+          })
+          financialLedgerEntryIds.push(entry.id)
+        }
+      }
       const resolvedAt = new Date()
-      current.status = dto.decision
+      // Legacy accepted/rejected requests remain readable during rollout. New
+      // adjudications expose an explicit final decision and its financial effect.
+      current.status =
+        dto.decision === 'accepted' || dto.decision === 'rejected'
+          ? dto.decision
+          : decision === 'uphold'
+            ? 'rejected'
+            : 'accepted'
       current.resolution = dto.resolution.trim()
       current.resolvedBy = actor.id
       current.resolvedAt = resolvedAt
+      current.adjudicationDecision = decision
+      current.amountBefore = amountBefore
+      current.amountAfter = amountAfter
+      current.financialLedgerEntryIds = financialLedgerEntryIds
       await manager.save(current)
       await manager.save(AuditLog, {
         actorType: 'admin',
         actorId: actor.id,
         actorName: actor.name ?? null,
-        actionType: AuditActionType.CREATOR_TASK_APPEAL_RESOLVED,
-        actionDescription: '创作者任务申诉处理',
+        actionType:
+          dto.decision === 'accepted' || dto.decision === 'rejected'
+            ? AuditActionType.CREATOR_TASK_APPEAL_RESOLVED
+            : AuditActionType.CREATOR_TASK_APPEAL_ADJUDICATED,
+        actionDescription:
+          dto.decision === 'accepted' || dto.decision === 'rejected'
+            ? '创作者任务申诉处理'
+            : '创作者任务申诉裁决',
         targetType: 'creator_task_appeal',
         targetId: current.id,
         metadata: {
-          decision: dto.decision,
+          decision:
+            dto.decision === 'accepted' || dto.decision === 'rejected' ? dto.decision : decision,
           resolution: current.resolution,
           target: current.target,
           creatorTaskId: current.creatorTaskId,
@@ -231,19 +582,44 @@ export class CreatorPortalService {
           merchantId: task?.merchantId ?? null,
           payoutId: payout?.id ?? current.payoutId ?? null,
           payoutStatus: payout?.status ?? null,
+          amountBefore,
+          amountAfter,
+          confirmedAmount: dto.confirmedAmount == null ? null : this.money(dto.confirmedAmount),
+          financialLedgerEntryIds,
           previousStatus: 'open',
         },
         result: 'success',
       })
       await manager.save(Notification, {
-        recipientId: current.creatorId,
-        recipientRole: UserRole.AGENT,
+        recipientId: current.appellantType === 'merchant' ? current.merchantId : current.creatorId,
+        recipientRole:
+          current.appellantType === 'merchant' ? UserRole.MERCHANT_ADMIN : UserRole.AGENT,
         type: 'creator_task_appeal_resolved',
-        title: dto.decision === 'accepted' ? '任务申诉已通过' : '任务申诉未通过',
-        body: `申诉处理结果：${dto.decision === 'accepted' ? '通过' : '驳回'}；处理说明：${current.resolution}`,
+        title: this.adjudicationTitle(decision),
+        body: `${this.adjudicationTitle(decision)}；处理依据：${current.resolution}`,
         targetType: 'creator_task_appeal',
         targetId: current.id,
-        metadata: { creatorTaskId: current.creatorTaskId, target: current.target, resolvedAt },
+        metadata: {
+          creatorTaskId: current.creatorTaskId,
+          target: current.target,
+          resolvedAt,
+          decision,
+          amountBefore,
+          amountAfter,
+        },
+      })
+      const counterpartyId =
+        current.appellantType === 'merchant' ? current.creatorId : current.merchantId
+      await manager.save(Notification, {
+        recipientId: counterpartyId,
+        recipientRole:
+          current.appellantType === 'merchant' ? UserRole.AGENT : UserRole.MERCHANT_ADMIN,
+        type: 'creator_task_appeal_adjudicated',
+        title: this.adjudicationTitle(decision),
+        body: `对方申诉已裁决；处理依据：${current.resolution}`,
+        targetType: 'creator_task_appeal',
+        targetId: current.id,
+        metadata: { creatorTaskId: current.creatorTaskId, decision, amountBefore, amountAfter },
       })
       return current
     })
@@ -268,6 +644,7 @@ export class CreatorPortalService {
       payout.verificationEvidence = dto.evidence ?? {}
       payout.verifiedAt = new Date()
       payout.settleAt = settleAt
+      payout.recoveryOffsetAmount = 0
       await manager.save(payout)
       let wallet = await manager.findOne(AgentWallet, {
         where: { agentId: task.creatorId },
@@ -283,6 +660,8 @@ export class CreatorPortalService {
           totalPlatformFee: 0,
           totalSettled: 0,
           totalWithdrawn: 0,
+          recoveryReceivableBalance: 0,
+          totalRecovered: 0,
           aiTokenBalance: 0,
           status: true,
         })
@@ -296,7 +675,7 @@ export class CreatorPortalService {
         actionDescription: 'creator_task_payout_verified',
         targetType: 'creator_task_payout',
         targetId: payout.id,
-        metadata: { taskId, amount, settleAt, evidence: dto.evidence ?? {} },
+        metadata: { taskId, amount, settleAt, recoveryOffsetAmount: 0, evidence: dto.evidence ?? {} },
         result: 'success',
       })
       await manager.save(Notification, {
@@ -399,15 +778,22 @@ export class CreatorPortalService {
     if (!appeals.length) return []
     const taskIds = [...new Set(appeals.map((item) => item.creatorTaskId))]
     const creatorIds = [...new Set(appeals.map((item) => item.creatorId))]
-    const [tasks, payouts, creators] = await Promise.all([
+    const ledgerIds = [
+      ...new Set(appeals.flatMap((item) => item.financialLedgerEntryIds ?? [])),
+    ]
+    const [tasks, payouts, creators, financialEntries] = await Promise.all([
       this.tasks.find({ where: { id: In(taskIds) } }),
       this.payouts.find({ where: { creatorTaskId: In(taskIds) } }),
       this.creators.find({ where: { id: In(creatorIds) } }),
+      ledgerIds.length
+        ? this.dataSource.getRepository(FinancialLedgerEntry).find({ where: { id: In(ledgerIds) } })
+        : Promise.resolve([] as FinancialLedgerEntry[]),
     ])
     const byTask = new Map(tasks.map((item) => [item.id, item]))
     const byPayoutTask = new Map(payouts.map((item) => [item.creatorTaskId, item]))
     const byPayoutId = new Map(payouts.map((item) => [item.id, item]))
     const byCreator = new Map(creators.map((item) => [item.id, item]))
+    const ledgerById = new Map(financialEntries.map((item) => [item.id, item]))
     return appeals.map((appeal) => {
       const task = byTask.get(appeal.creatorTaskId)
       const payout =
@@ -419,14 +805,46 @@ export class CreatorPortalService {
         appealId: appeal.id,
         creatorTaskId: appeal.creatorTaskId,
         creatorId: appeal.creatorId,
+        merchantId: appeal.merchantId,
         payoutId: appeal.payoutId ?? null,
+        appellantType: appeal.appellantType,
         target: appeal.target,
+        appealDeadlineAt: appeal.appealDeadlineAt,
         status: appeal.status,
         reason: appeal.reason,
         evidence: appeal.evidence ?? {},
         resolution: appeal.resolution ?? null,
         resolvedBy: appeal.resolvedBy ?? null,
         resolvedAt: appeal.resolvedAt ?? null,
+        adjudicationDecision: appeal.adjudicationDecision ?? null,
+        amountBefore: appeal.amountBefore == null ? null : Number(appeal.amountBefore),
+        amountAfter: appeal.amountAfter == null ? null : Number(appeal.amountAfter),
+        recovery: {
+          amount: Number(appeal.recoveryAmount ?? 0),
+          recovered: Number(appeal.recoveryRecoveredAmount ?? 0),
+          remaining: this.money(
+            Math.max(0, Number(appeal.recoveryAmount ?? 0) - Number(appeal.recoveryRecoveredAmount ?? 0)),
+          ),
+          status:
+            Number(appeal.recoveryAmount ?? 0) === 0
+              ? 'not_applicable'
+              : Number(appeal.recoveryRecoveredAmount ?? 0) >= Number(appeal.recoveryAmount ?? 0)
+                ? 'completed'
+                : 'recovering',
+          completedAt: appeal.recoveryCompletedAt ?? null,
+        },
+        financialLedgerEntryIds: appeal.financialLedgerEntryIds ?? [],
+        financialLedgerEntries: (appeal.financialLedgerEntryIds ?? [])
+          .map((id) => ledgerById.get(id))
+          .filter((item): item is FinancialLedgerEntry => Boolean(item))
+          .map((item) => ({
+            id: item.id,
+            entryType: item.entryType,
+            amount: Number(item.amount),
+            description: item.description ?? null,
+            occurredAt: item.occurredAt,
+            metadata: item.metadata ?? {},
+          })),
         createdAt: appeal.createdAt,
         updatedAt: appeal.updatedAt,
         creator: creator
@@ -504,6 +922,14 @@ export class CreatorPortalService {
           verifiedAt: payout.verifiedAt ?? null,
           settleAt: payout.settleAt ?? null,
           settledAt: payout.settledAt ?? null,
+          adjudicatedAmount:
+            payout.adjudicatedAmount == null ? null : Number(payout.adjudicatedAmount),
+          adjudicatedAt: payout.adjudicatedAt ?? null,
+          recoveryOffsetAmount: Number(payout.recoveryOffsetAmount ?? 0),
+          settledAmount: this.money(
+            Number(payout.adjudicatedAmount ?? payout.verifiedAmount ?? 0) -
+              Number(payout.recoveryOffsetAmount ?? 0),
+          ),
           riskHoldReason: payout.riskHoldReason ?? null,
           riskHoldPreviousStatus: payout.riskHoldPreviousStatus ?? null,
         }
@@ -535,6 +961,24 @@ export class CreatorPortalService {
   private maskPhone(phone?: string | null) {
     return phone && phone.length >= 7 ? `${phone.slice(0, 3)}****${phone.slice(-4)}` : (phone ?? '')
   }
+  private appealDeadline(
+    task: CreatorTask,
+    payout: CreatorTaskPayout | null,
+    target: 'task' | 'payout',
+  ) {
+    let completedAt: Date | null = null
+    if (target === 'task') {
+      if (task.status !== 'completed') throw new BadRequestException('仅任务完成后可发起履约申诉')
+      completedAt = task.stateChangedAt ?? task.updatedAt
+    } else {
+      if (!payout || payout.status !== 'settled' || !payout.settledAt)
+        throw new BadRequestException('仅报酬结算完成后可发起结算申诉')
+      completedAt = payout.settledAt
+    }
+    const deadline = new Date(completedAt)
+    deadline.setDate(deadline.getDate() + 30)
+    return deadline
+  }
   private addBusinessDays(date: Date, days: number) {
     const value = new Date(date)
     while (days > 0) {
@@ -543,5 +987,151 @@ export class CreatorPortalService {
     }
     value.setHours(0, 0, 0, 0)
     return value
+  }
+  private normalizeAdjudicationDecision(
+    decision: ResolveCreatorTaskAppealDto['decision'],
+  ): CreatorTaskAppealDecision {
+    // accepted/rejected are retained only for clients deployed before the
+    // adjudication workflow; they are non-financial uphold decisions.
+    return decision === 'adjust_payout' || decision === 'reverse_settlement' ? decision : 'uphold'
+  }
+  private assertConfirmedAmount(value: number | undefined, expected: number, label: string) {
+    if (value === undefined) throw new BadRequestException(`涉及资金变动时必须二次确认${label}`)
+    if (this.money(value) !== expected)
+      throw new BadRequestException(`二次确认${label}与裁决金额不一致，未执行账务变动`)
+  }
+  private adjudicationTitle(decision: CreatorTaskAppealDecision) {
+    return {
+      uphold: '裁决：维持原结果',
+      adjust_payout: '裁决：调整报酬',
+      reverse_settlement: '裁决：撤销/追回结算',
+    }[decision]
+  }
+  private async applyPayoutAdjustment(manager: any, payout: CreatorTaskPayout, delta: number) {
+    if (!['verified', 'settled'].includes(payout.status))
+      throw new BadRequestException('仅已核验或已结算的报酬可调整')
+    const wallet = await this.walletForAdjudication(manager, payout.creatorId)
+    if (payout.status === 'verified') {
+      const nextPending = this.money(Number(wallet.pendingSettlementBalance) + delta)
+      if (nextPending < 0) throw new BadRequestException('待结算余额不足，无法下调该报酬')
+      wallet.pendingSettlementBalance = nextPending
+    } else {
+      const nextSettled = this.money(Number(wallet.settledBalance) + delta)
+      if (nextSettled < 0) throw new BadRequestException('可用钱包余额不足，无法下调已结算报酬')
+      wallet.settledBalance = nextSettled
+      wallet.totalSettled = this.money(Number(wallet.totalSettled) + delta)
+    }
+    wallet.totalEarned = this.money(Number(wallet.totalEarned) + delta)
+    await manager.save(wallet)
+  }
+  private async reversePayout(manager: any, payout: CreatorTaskPayout, amount: number) {
+    const wallet = await this.walletForAdjudication(manager, payout.creatorId)
+    let recoveredNow = 0
+    if (payout.status === 'verified') {
+      const nextPending = this.money(Number(wallet.pendingSettlementBalance) - amount)
+      if (nextPending < 0) throw new BadRequestException('待结算余额不足，无法撤销该报酬')
+      wallet.pendingSettlementBalance = nextPending
+    } else {
+      const available = Number(wallet.settledBalance)
+      recoveredNow = this.money(Math.min(available, amount))
+      wallet.settledBalance = this.money(available - recoveredNow)
+      wallet.totalSettled = this.money(Math.max(0, Number(wallet.totalSettled) - amount))
+      wallet.totalRecovered = this.money(Number(wallet.totalRecovered ?? 0) + recoveredNow)
+      wallet.recoveryReceivableBalance = this.money(
+        Number(wallet.recoveryReceivableBalance ?? 0) + amount - recoveredNow,
+      )
+    }
+    wallet.totalEarned = this.money(Math.max(0, Number(wallet.totalEarned) - amount))
+    await manager.save(wallet)
+    return recoveredNow
+  }
+  private async walletForAdjudication(manager: any, creatorId: string) {
+    let wallet = await manager.findOne(AgentWallet, {
+      where: { agentId: creatorId },
+      lock: { mode: 'pessimistic_write' },
+    })
+    if (!wallet)
+      wallet = manager.create(AgentWallet, {
+        agentId: creatorId,
+        pendingSettlementBalance: 0,
+        settledBalance: 0,
+        frozenBalance: 0,
+        totalEarned: 0,
+        totalPlatformFee: 0,
+        totalSettled: 0,
+        totalWithdrawn: 0,
+        recoveryReceivableBalance: 0,
+        totalRecovered: 0,
+        aiTokenBalance: 0,
+        status: true,
+      })
+    return wallet
+  }
+  private async recordAdjudicationLedger(
+    manager: any,
+    input: {
+      appeal: CreatorTaskAppeal
+      payout: CreatorTaskPayout
+      actorId: string
+      amount: number
+      entryType: 'appeal_payout_adjustment' | 'appeal_payout_reversal'
+      description: string
+      amountBefore: number
+      amountAfter: number
+    },
+  ) {
+    return manager.save(
+      FinancialLedgerEntry,
+      manager.create(FinancialLedgerEntry, {
+        classification: 'cogs',
+        entryType: input.entryType,
+        amount: input.amount,
+        currency: 'CNY',
+        merchantId: input.payout.merchantId,
+        campaignId: input.payout.campaignId ?? null,
+        creatorId: input.payout.creatorId,
+        creatorTaskId: input.payout.creatorTaskId,
+        sourceReference: `appeal:${input.appeal.id}`,
+        idempotencyKey: `appeal-adjudication:${input.appeal.id}:${input.entryType}`,
+        recordedByAdminId: input.actorId,
+        occurredAt: new Date(),
+        description: input.description,
+        metadata: {
+          appealId: input.appeal.id,
+          payoutId: input.payout.id,
+          amountBefore: input.amountBefore,
+          amountAfter: input.amountAfter,
+        },
+      }),
+    )
+  }
+  private recoveryRisk(resolvedAt: Date, lastOffsetAt: Date | null) {
+    const start = lastOffsetAt ?? resolvedAt
+    const daysWithoutOffset = Math.max(
+      0,
+      Math.floor((Date.now() - new Date(start).getTime()) / (24 * 60 * 60 * 1000)),
+    )
+    if (daysWithoutOffset >= 60)
+      return {
+        level: 'critical' as const,
+        daysWithoutOffset,
+        recommendedAction: '人工核查并按已审批规则决定协商或核销；系统不会自动核销。',
+      }
+    if (daysWithoutOffset >= 30)
+      return {
+        level: 'overdue' as const,
+        daysWithoutOffset,
+        recommendedAction: '进入人工协商队列；如需暂停提现，须由有权限的运营人员单独处理。',
+      }
+    if (daysWithoutOffset >= 7)
+      return {
+        level: 'watch' as const,
+        daysWithoutOffset,
+        recommendedAction: '运营跟进创作者后续结算情况。',
+      }
+    return { level: 'normal' as const, daysWithoutOffset, recommendedAction: '持续自动抵扣。' }
+  }
+  private money(value: number) {
+    return Math.round(value * 100) / 100
   }
 }

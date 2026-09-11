@@ -25,6 +25,7 @@ import {
   MerchantLoginDto,
   AgentRegisterDto,
   AgentLoginDto,
+  AgentMiniProgramLoginDto,
   SendSmsCodeDto,
   SmsLoginDto,
   RefreshTokenDto,
@@ -71,6 +72,13 @@ export class AuthController {
   @ApiOperation({ summary: 'Agent login with phone + password' })
   async agentLogin(@Body() dto: AgentLoginDto) {
     return this.authService.agentLogin(dto)
+  }
+
+  @Post('agent/mini-program/login')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: '微信小程序登录并绑定达人身份' })
+  async agentMiniProgramLogin(@Body() dto: AgentMiniProgramLoginDto) {
+    return this.authService.agentMiniProgramLogin(dto.code, dto.phoneCode)
   }
 
   // ==================== SMS ====================

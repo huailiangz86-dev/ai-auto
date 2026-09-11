@@ -57,6 +57,25 @@ export interface CustomerProfile {
   totalSpend: number
 }
 
+export interface PersonalDataExportRequest {
+  requestId: string
+  status: 'pending' | 'processing' | 'completed' | 'failed' | string
+  completedAt?: string | null
+  downloadPath: string
+}
+
+export interface PersonalDataExport {
+  requestId: string
+  generatedAt?: string | null
+  format: 'json'
+  data: {
+    profile: Record<string, unknown>
+    attributions: Array<Record<string, unknown>>
+    coupons: Array<Record<string, unknown>>
+    redemptions: Array<Record<string, unknown>>
+  }
+}
+
 export interface CouponEvidenceEvent {
   type: string
   occurredAt: string
