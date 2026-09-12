@@ -1,6 +1,7 @@
 import {
   IsArray,
   IsIn,
+  IsInt,
   IsNotEmpty,
   IsNumber,
   IsObject,
@@ -9,9 +10,11 @@ import {
   IsUrl,
   IsUUID,
   MaxLength,
+  Max,
   Min,
   ValidateIf,
 } from 'class-validator'
+import { CREATOR_TASK_STATUSES, CreatorTaskStatus } from '../entities/growth-task.entity'
 
 export class UpdateCreatorProfileDto {
   @IsOptional() @IsString() @MaxLength(100) nickname?: string
@@ -25,9 +28,9 @@ export class SubmitCreatorVerificationDto {
   @IsNotEmpty() @IsString() @MaxLength(50) idCardNo!: string
 }
 export class CreatorTaskListQueryDto {
-  @IsOptional() @IsString() @MaxLength(24) status?: string
-  @IsOptional() @IsNumber() @Min(1) page?: number = 1
-  @IsOptional() @IsNumber() @Min(1) pageSize?: number = 20
+  @IsOptional() @IsIn(CREATOR_TASK_STATUSES) status?: CreatorTaskStatus
+  @IsOptional() @IsInt() @Min(1) page?: number = 1
+  @IsOptional() @IsInt() @Min(1) @Max(100) pageSize?: number = 20
 }
 
 export class CreateCreatorTaskAppealDto {
@@ -37,7 +40,7 @@ export class CreateCreatorTaskAppealDto {
 }
 export class CreateMerchantTaskAppealDto extends CreateCreatorTaskAppealDto {}
 export class VerifyCreatorTaskPayoutDto {
-  @IsNumber() @Min(0) verifiedAmount!: number
+  @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) verifiedAmount!: number
   @IsOptional() @IsObject() evidence?: Record<string, unknown>
 }
 export class ListCreatorTaskAppealsDto {
@@ -59,16 +62,15 @@ export class ResolveCreatorTaskAppealDto {
   @ValidateIf((dto: ResolveCreatorTaskAppealDto) =>
     ['adjust_payout', 'reverse_settlement'].includes(dto.decision),
   )
-  @IsNumber() @Min(0) confirmedAmount?: number
+  @IsNumber()
+  @Min(0)
+  confirmedAmount?: number
   @IsNotEmpty() @IsString() @MaxLength(2000) resolution!: string
 }
 export class ListRecoveryReceivablesDto {
   @IsOptional() @IsUUID() creatorId?: string
   @IsOptional() @IsIn(['all', 'watch', 'overdue', 'critical']) riskLevel?:
-    | 'all'
-    | 'watch'
-    | 'overdue'
-    | 'critical' = 'all'
+    'all' | 'watch' | 'overdue' | 'critical' = 'all'
   @IsOptional() @IsNumber() @Min(1) page?: number = 1
   @IsOptional() @IsNumber() @Min(1) pageSize?: number = 20
 }

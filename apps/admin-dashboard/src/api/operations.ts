@@ -57,6 +57,9 @@ export interface FraudAlert {
   severity: string
   confidence: number
   status: string
+  agentId: string | null
+  merchantId: string | null
+  redemptionId: string | null
   evidence: unknown
   createdAt: string
 }
@@ -108,6 +111,85 @@ export interface Reconciliation {
   settled: boolean
   settledAt: string | null
 }
+export interface FinanceReconciliationOverview {
+  generatedAt: string
+  definition: {
+    internal: string
+    merchant: string
+    creator: string
+    recovery: string
+  }
+  internal: {
+    ledgerRevenue: number
+    creatorPayoutCogs: number
+    operatingCost: number
+    riskReserve: number
+    ledgerNetResult: number
+    ledgerEntryCount: number
+    platformRevenue: number
+    platformRevenueSettled: number
+    platformRevenuePending: number
+    platformRevenuePendingCount: number
+  }
+  merchant: {
+    summary: {
+      merchants: number
+      campaignCount: number
+      plannedBudget: number
+      committedBudget: number
+      spentBudget: number
+      budgetRemaining: number
+      platformRevenue: number
+      platformRevenuePending: number
+    }
+    items: FinanceMerchantReconciliation[]
+  }
+  creator: {
+    summary: {
+      creators: number
+      taskCount: number
+      pendingReviewCount: number
+      expectedPayout: number
+      verifiedPayout: number
+      settledPayout: number
+      heldPayout: number
+      outstandingPayout: number
+    }
+    items: FinanceCreatorReconciliation[]
+  }
+  recovery: {
+    adjudicationReceivable: number
+    walletReceivable: number
+    difference: number
+    status: 'balanced' | 'attention'
+  }
+}
+export interface FinanceMerchantReconciliation {
+  merchantId: string
+  merchantName: string
+  campaignCount: number
+  plannedBudget: number
+  committedBudget: number
+  spentBudget: number
+  budgetRemaining: number
+  platformRevenue: number
+  platformRevenueSettled: number
+  platformRevenuePending: number
+  status: 'balanced' | 'pending' | 'exception'
+}
+export interface FinanceCreatorReconciliation {
+  creatorId: string
+  creatorName: string
+  taskCount: number
+  pendingReviewCount: number
+  payoutCount: number
+  expectedPayout: number
+  verifiedPayout: number
+  settledPayout: number
+  heldPayout: number
+  outstandingPayout: number
+  status: 'balanced' | 'pending' | 'risk_hold'
+}
 export type FinancialClassification = 'revenue' | 'cogs' | 'operating_cost' | 'reserve'
 export interface FinancialLedgerEntry {
   entryId: string
@@ -148,8 +230,13 @@ export interface ModerationContent {
   type: string
   platform: string | null
   agentId: string
+  creatorId: string
+  merchantId: string | null
+  campaignId: string | null
+  creatorTaskId: string | null
   status: string
   moderationStatus: string
+  moderationMessage: string | null
   content: Record<string, unknown> | null
   trackingUrl: string | null
   createdAt: string
@@ -179,8 +266,21 @@ export const approveAgent = (id: string) =>
   request(`/admin/agents/${id}/approve`, { method: 'POST', body: '{}' })
 export const rejectAgent = (id: string, reason: string) =>
   request(`/admin/agents/${id}/reject`, { method: 'POST', body: JSON.stringify({ reason }) })
-export const getFraudAlerts = () =>
-  request<{ summary: Record<string, number>; items: FraudAlert[] }>('/admin/fraud/alerts')
+export interface FraudAlertQuery {
+  severity?: string
+  status?: string
+  alertType?: string
+  merchantId?: string
+  agentId?: string
+  page?: number
+  pageSize?: number
+}
+export const getFraudAlerts = (query: FraudAlertQuery = {}) =>
+  request<{
+    summary: Record<string, number>
+    items: FraudAlert[]
+    pagination: PageResult<FraudAlert>['pagination']
+  }>(`/admin/fraud/alerts${queryString(query)}`)
 export const resolveFraudAlert = (
   id: string,
   action: 'dismiss' | 'review' | 'freeze_commission',
@@ -215,12 +315,31 @@ export const getReconciliations = () =>
   request<{ summary: { pendingAmount: number }; items: Reconciliation[] }>(
     '/admin/finance/reconciliations?status=pending',
   )
+export const getFinanceReconciliationOverview = (
+  query: { merchantId?: string; creatorId?: string } = {},
+) =>
+  request<FinanceReconciliationOverview>(
+    `/admin/finance/reconciliation-overview${queryString(query)}`,
+  )
 export const settleReconciliation = (id: string) =>
   request(`/admin/finance/reconciliations/${id}/settle`, { method: 'POST', body: '{}' })
 export const getCampaignEconomics = (query: Record<string, string | number | undefined> = {}) =>
   request<CampaignEconomics>(`/admin/finance/campaign-economics${queryString(query)}`)
-export const getModerationContents = () =>
-  request<PageResult<ModerationContent>>('/admin/contents/moderation?status=pending')
+export interface ModerationContentQuery {
+  status?: string
+  contentType?: string
+  targetPlatform?: string
+  merchantId?: string
+  creatorId?: string
+  campaignId?: string
+  creatorTaskId?: string
+  page?: number
+  pageSize?: number
+}
+export const getModerationContents = (query: ModerationContentQuery = {}) =>
+  request<PageResult<ModerationContent>>(
+    `/admin/contents/moderation${queryString({ ...query, status: query.status || 'pending' })}`,
+  )
 export const moderateContent = (
   id: string,
   decision: 'passed' | 'flagged' | 'blocked',
@@ -230,8 +349,14 @@ export const moderateContent = (
     method: 'POST',
     body: JSON.stringify({ decision, message }),
   })
-export const getOperationAuditLogs = () =>
-  request<PageResult<OperationAuditLog>>('/admin/audit-logs')
+export interface OperationAuditLogQuery {
+  targetType?: string
+  targetId?: string
+  page?: number
+  pageSize?: number
+}
+export const getOperationAuditLogs = (query: OperationAuditLogQuery = {}) =>
+  request<PageResult<OperationAuditLog>>(`/admin/audit-logs${queryString(query)}`)
 
 export interface CreatorTaskQueueItem {
   id: string
@@ -408,6 +533,7 @@ export interface RecoveryReconciliation {
   }
 }
 export interface CreatorTaskQueueQuery {
+  creatorTaskId?: string
   campaignId?: string
   merchantId?: string
   creatorId?: string
@@ -463,12 +589,17 @@ export const getCreatorTaskAppeals = (query: CreatorTaskAppealQuery = {}) =>
       summary: Record<'open' | 'accepted' | 'rejected' | 'withdrawn' | 'total', number>
     }
   >(`/admin/creator-tasks/appeals${queryString(query)}`)
-export const getRecoveryReceivables = (query: {
-  creatorId?: string
-  riskLevel?: 'all' | Exclude<RecoveryRiskLevel, 'normal'>
-  page?: number
-  pageSize?: number
-} = {}) => request<RecoveryReceivablesResult>(`/admin/creator-tasks/recovery-receivables${queryString(query)}`)
+export const getRecoveryReceivables = (
+  query: {
+    creatorId?: string
+    riskLevel?: 'all' | Exclude<RecoveryRiskLevel, 'normal'>
+    page?: number
+    pageSize?: number
+  } = {},
+) =>
+  request<RecoveryReceivablesResult>(
+    `/admin/creator-tasks/recovery-receivables${queryString(query)}`,
+  )
 export const getRecoveryReconciliation = () =>
   request<RecoveryReconciliation>('/admin/creator-tasks/recovery-reconciliation')
 export const resolveCreatorTaskAppeal = (

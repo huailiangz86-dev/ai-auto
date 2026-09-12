@@ -6,15 +6,18 @@ import { DataSource } from 'typeorm'
 
 import { AgentWallet } from '../agent/entities/agent-wallet.entity'
 import { AuditLog } from '../admin/entities/audit-log.entity'
+import { FinancialLedgerEntry } from '../admin/entities/financial-ledger-entry.entity'
 import { SharingAgent } from '../agent/entities/sharing-agent.entity'
 import { Notification } from '../notification/entities/notification.entity'
 import { CampaignBudgetAllocation } from './entities/campaign-budget-allocation.entity'
 import { CreatorTaskAppeal, CreatorTaskPayout } from './entities/creator-task-payout.entity'
 import { CreatorTask, GrowthTask } from './entities/growth-task.entity'
 import { CreatorPortalService } from './creator-portal.service'
+import { GrowthTaskService } from './growth-task.service'
 
 const createRepo = () => ({
   find: jest.fn().mockResolvedValue([]),
+  findBy: jest.fn().mockResolvedValue([]),
   findOne: jest.fn(),
   findAndCount: jest.fn(),
   count: jest.fn(),
@@ -103,6 +106,9 @@ describe('CreatorPortalService operations appeals', () => {
     payouts = createRepo()
     appeals = createRepo()
     wallets = createRepo()
+    const growthTaskService = {
+      expireOverdueCreatorTasks: jest.fn().mockResolvedValue({ expiredCount: 0, items: [] }),
+    }
     manager = {
       findOne: jest.fn(),
       save: jest.fn((entityOrValue, maybeValue) => Promise.resolve(maybeValue ?? entityOrValue)),
@@ -125,6 +131,7 @@ describe('CreatorPortalService operations appeals', () => {
         { provide: getRepositoryToken(CreatorTaskAppeal), useValue: appeals },
         { provide: getRepositoryToken(AgentWallet), useValue: wallets },
         { provide: DataSource, useValue: dataSource },
+        { provide: GrowthTaskService, useValue: growthTaskService },
       ],
     }).compile()
     service = module.get(CreatorPortalService)
@@ -290,49 +297,82 @@ describe('CreatorPortalService operations appeals', () => {
   })
 
   it('lists outstanding recovery receivables by adjudication with linked offset records', async () => {
-    appeals.find.mockResolvedValueOnce([{
-      id: 'appeal-recovery-1', creatorId: 'creator-1', creatorTaskId: 'task-1', payoutId: 'payout-1',
-      merchantId: 'merchant-1', status: 'accepted', adjudicationDecision: 'reverse_settlement',
-      recoveryAmount: 100, recoveryRecoveredAmount: 70, resolvedAt: new Date('2026-08-01T08:00:00Z'),
-      createdAt: new Date('2026-08-01T08:00:00Z'),
-    }])
-    ledgerEntries.find.mockResolvedValueOnce([{
-      id: 'ledger-offset-1', entryType: 'recovery_auto_offset', amount: -70,
-      occurredAt: new Date('2026-08-15T08:00:00Z'),
-      metadata: { appealId: 'appeal-recovery-1', settlementPayoutId: 'payout-later-1' },
-    }])
-    wallets.find.mockResolvedValueOnce([{
-      agentId: 'creator-1', recoveryReceivableBalance: 30, settledBalance: 0, pendingSettlementBalance: 10,
-    }])
+    appeals.find.mockResolvedValueOnce([
+      {
+        id: 'appeal-recovery-1',
+        creatorId: 'creator-1',
+        creatorTaskId: 'task-1',
+        payoutId: 'payout-1',
+        merchantId: 'merchant-1',
+        status: 'accepted',
+        adjudicationDecision: 'reverse_settlement',
+        recoveryAmount: 100,
+        recoveryRecoveredAmount: 70,
+        resolvedAt: new Date('2026-08-01T08:00:00Z'),
+        createdAt: new Date('2026-08-01T08:00:00Z'),
+      },
+    ])
+    ledgerEntries.find.mockResolvedValueOnce([
+      {
+        id: 'ledger-offset-1',
+        entryType: 'recovery_auto_offset',
+        amount: -70,
+        occurredAt: new Date('2026-08-15T08:00:00Z'),
+        metadata: { appealId: 'appeal-recovery-1', settlementPayoutId: 'payout-later-1' },
+      },
+    ])
+    wallets.find.mockResolvedValueOnce([
+      {
+        agentId: 'creator-1',
+        recoveryReceivableBalance: 30,
+        settledBalance: 0,
+        pendingSettlementBalance: 10,
+      },
+    ])
     creators.find.mockResolvedValueOnce([creator])
 
     const result = await service.listRecoveryReceivables({ page: 1, pageSize: 20 })
 
     expect(result).toMatchObject({
-      items: [{
-        appealId: 'appeal-recovery-1', creatorId: 'creator-1', remainingAmount: 30, recoveredAmount: 70,
-        offsets: [{ ledgerEntryId: 'ledger-offset-1', settlementPayoutId: 'payout-later-1' }],
-        creator: { nickname: '小美妈妈', phone: '138****5678' },
-      }],
+      items: [
+        {
+          appealId: 'appeal-recovery-1',
+          creatorId: 'creator-1',
+          remainingAmount: 30,
+          recoveredAmount: 70,
+          offsets: [{ ledgerEntryId: 'ledger-offset-1', settlementPayoutId: 'payout-later-1' }],
+          creator: { nickname: '小美妈妈', phone: '138****5678' },
+        },
+      ],
       pagination: { total: 1 },
     })
     expect(appeals.find).toHaveBeenCalledWith(
-      expect.objectContaining({ where: expect.objectContaining({ adjudicationDecision: 'reverse_settlement' }) }),
+      expect.objectContaining({
+        where: expect.objectContaining({ adjudicationDecision: 'reverse_settlement' }),
+      }),
     )
   })
 
   it('reconciles wallet receivables and settlement-offset ledger entries every day', async () => {
-    wallets.find.mockResolvedValueOnce([
-      { agentId: 'creator-1', recoveryReceivableBalance: 30 },
+    wallets.find.mockResolvedValueOnce([{ agentId: 'creator-1', recoveryReceivableBalance: 30 }])
+    appeals.find.mockResolvedValueOnce([
+      {
+        id: 'appeal-recovery-1',
+        creatorId: 'creator-1',
+        status: 'accepted',
+        adjudicationDecision: 'reverse_settlement',
+        recoveryAmount: 100,
+        recoveryRecoveredAmount: 70,
+      },
     ])
-    appeals.find.mockResolvedValueOnce([{
-      id: 'appeal-recovery-1', creatorId: 'creator-1', status: 'accepted',
-      adjudicationDecision: 'reverse_settlement', recoveryAmount: 100, recoveryRecoveredAmount: 70,
-    }])
-    ledgerEntries.find.mockResolvedValueOnce([{
-      id: 'ledger-offset-1', entryType: 'recovery_auto_offset', amount: -70,
-      metadata: { appealId: 'appeal-recovery-1', settlementPayoutId: 'payout-later-1' },
-    }])
+    ledgerEntries.find.mockResolvedValueOnce([
+      {
+        id: 'ledger-offset-1',
+        entryType: 'recovery_auto_offset',
+        amount: -70,
+        metadata: { appealId: 'appeal-recovery-1', settlementPayoutId: 'payout-later-1' },
+      },
+    ])
     payouts.find.mockResolvedValueOnce([{ id: 'payout-later-1', recoveryOffsetAmount: 70 }])
 
     await expect(service.recoveryReconciliation()).resolves.toMatchObject({
@@ -355,5 +395,113 @@ describe('CreatorPortalService operations appeals', () => {
       service.verifyPayout('task-1', 'admin-1', { verifiedAmount: 100 }),
     ).rejects.toBeInstanceOf(BadRequestException)
     expect(manager.save).not.toHaveBeenCalled()
+  })
+
+  it('keeps payout, wallet and Creator Payout COGS consistent when verifying', async () => {
+    const estimatedPayout = {
+      ...payout,
+      creatorId: 'creator-1',
+      merchantId: 'merchant-1',
+      campaignId: 'campaign-1',
+      status: 'estimated',
+      verifiedAmount: null,
+      verifiedAt: null,
+      settleAt: null,
+    }
+    const wallet = {
+      agentId: 'creator-1',
+      pendingSettlementBalance: '25.00',
+      settledBalance: '40.00',
+      totalEarned: '75.00',
+    }
+    manager.findOne.mockImplementation((entity: unknown) => {
+      if (entity === CreatorTask) return Promise.resolve(task)
+      if (entity === CreatorTaskPayout) return Promise.resolve(estimatedPayout)
+      if (entity === AgentWallet) return Promise.resolve(wallet)
+      return Promise.resolve(null)
+    })
+
+    await service.verifyPayout('task-1', 'admin-1', {
+      verifiedAmount: 100,
+      evidence: { verifiedRedemptions: 10 },
+    })
+
+    expect(estimatedPayout).toMatchObject({ status: 'verified', verifiedAmount: 100 })
+    expect(wallet).toMatchObject({
+      pendingSettlementBalance: 125,
+      settledBalance: '40.00',
+      totalEarned: 175,
+    })
+    expect(manager.save).toHaveBeenCalledWith(
+      FinancialLedgerEntry,
+      expect.objectContaining({
+        classification: 'cogs',
+        entryType: 'creator_task_payout',
+        amount: 100,
+        merchantId: 'merchant-1',
+        campaignId: 'campaign-1',
+        creatorId: 'creator-1',
+        creatorTaskId: 'task-1',
+        sourceReference: 'payout-1',
+        idempotencyKey: 'creator-task-payout:payout-1:verified',
+        recordedByAdminId: 'admin-1',
+      }),
+    )
+  })
+
+  it('exposes lifecycle progress, available actions and state history for my tasks', async () => {
+    const taskWithLifecycle = {
+      ...task,
+      status: 'approved',
+      stateReason: null,
+      stateChangedBy: 'admin-1',
+      stateChangedAt: new Date('2026-09-04T08:00:00Z'),
+      campaignCreditsAllocated: '20.00',
+      campaignCreditsConsumed: '5.00',
+      performanceReward: { redemption: 10 },
+      publishedUrl: null,
+    }
+    const growth = { id: 'growth-1', status: 'active' }
+    const audit = {
+      id: 'audit-1',
+      targetType: 'creator_task',
+      targetId: 'task-1',
+      actionType: AuditActionType.CREATOR_TASK_REVIEWED,
+      actionDescription: 'creator_task_reviewed',
+      actorType: 'admin',
+      actorId: 'admin-1',
+      metadata: { before: 'submitted', after: 'approved', reason: '内容合规' },
+      createdAt: new Date('2026-09-04T08:00:00Z'),
+    }
+    tasks.findAndCount.mockResolvedValueOnce([[taskWithLifecycle], 1])
+    const growthTasks = (service as any).growthTasks
+    const allocations = (service as any).allocations
+    growthTasks.findBy.mockResolvedValueOnce([growth])
+    allocations.find.mockResolvedValueOnce([
+      { growthTaskId: 'growth-1', category: 'creator_payout', status: 'funded' },
+      { growthTaskId: 'growth-1', category: 'campaign_credits', status: 'funded' },
+    ])
+    payouts.find.mockResolvedValueOnce([])
+    dataSource.getRepository.mockReturnValueOnce({ find: jest.fn().mockResolvedValue([audit]) })
+
+    const result = await service.listTasks('creator-1', { page: 1, pageSize: 20 })
+
+    expect(result.items[0]).toMatchObject({
+      status: 'approved',
+      stateChangedBy: 'admin-1',
+      lifecycle: {
+        currentStatus: 'approved',
+        availableActions: ['publish'],
+        progress: { currentStep: 7, totalSteps: 11 },
+        history: [
+          expect.objectContaining({
+            fromStatus: 'submitted',
+            toStatus: 'approved',
+            reason: '内容合规',
+          }),
+        ],
+      },
+    })
+    expect(result.items[0].campaignCredits).toEqual({ allocated: 20, consumed: 5, remaining: 15 })
   })
 })

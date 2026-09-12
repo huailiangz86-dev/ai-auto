@@ -27,10 +27,21 @@ async function bootstrap() {
   )
 
   // CORS
-  const configuredOrigins = process.env.CORS_ORIGINS?.split(',').map((origin) => origin.trim()).filter(Boolean) ?? []
-  const localDevOrigins = process.env.NODE_ENV === 'production'
-    ? []
-    : ['http://127.0.0.1:3101', 'http://localhost:3101', 'http://127.0.0.1:3102', 'http://localhost:3102']
+  const configuredOrigins =
+    process.env.CORS_ORIGINS?.split(',')
+      .map((origin) => origin.trim())
+      .filter(Boolean) ?? []
+  const localDevOrigins =
+    process.env.NODE_ENV === 'production'
+      ? []
+      : [
+          'http://127.0.0.1:3100',
+          'http://localhost:3100',
+          'http://127.0.0.1:3101',
+          'http://localhost:3101',
+          'http://127.0.0.1:3102',
+          'http://localhost:3102',
+        ]
   app.enableCors({
     origin: [...new Set([...configuredOrigins, ...localDevOrigins])],
     credentials: true,

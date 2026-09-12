@@ -307,4 +307,60 @@ describe('FinancialLedgerService', () => {
     expect(result.totals.creatorPayoutCogs).toBe(80)
     expect(result.entries.map((entry) => entry.entryId)).toEqual(['ledger-cogs'])
   })
+
+  it('nets Creator Payout COGS to zero after a payout reversal', async () => {
+    const occurredAt = new Date('2026-09-04T08:00:00Z')
+    repo.find.mockResolvedValueOnce([
+      {
+        id: 'ledger-payout',
+        classification: 'cogs',
+        entryType: 'creator_task_payout',
+        amount: '100.00',
+        currency: 'CNY',
+        creatorTaskId: 'task-1',
+        sourceReference: 'payout-1',
+        occurredAt,
+        metadata: { payoutId: 'payout-1' },
+      },
+      {
+        id: 'ledger-reversal',
+        classification: 'cogs',
+        entryType: 'creator_payout_reversal',
+        amount: '-100.00',
+        currency: 'CNY',
+        creatorTaskId: 'task-1',
+        sourceReference: 'payout-1',
+        occurredAt,
+        metadata: { payoutId: 'payout-1' },
+      },
+    ])
+    platformRevenueRepo.find.mockResolvedValueOnce([])
+    commissionRepo.find.mockResolvedValueOnce([])
+    creatorTaskPayoutRepo.find.mockResolvedValueOnce([
+      {
+        id: 'payout-1',
+        creatorTaskId: 'task-1',
+        creatorId: 'creator-1',
+        merchantId: 'merchant-1',
+        campaignId: 'campaign-1',
+        expectedAmount: '100.00',
+        verifiedAmount: '100.00',
+        status: 'rejected',
+        createdAt: occurredAt,
+        verifiedAt: occurredAt,
+      },
+    ])
+
+    const result = await service.getEconomics({
+      merchantId: 'merchant-1',
+      campaignId: 'campaign-1',
+    })
+
+    expect(result.totals.creatorPayoutCogs).toBe(0)
+    expect(result.summary.byEntryType).toMatchObject({
+      creator_task_payout: 100,
+      creator_payout_reversal: -100,
+    })
+    expect(result.entries).toHaveLength(2)
+  })
 })

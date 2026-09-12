@@ -52,6 +52,7 @@ export class ResolveRiskHoldDto extends TaskReasonDto {
 
 /** Filters shared by the operations review and risk queues. */
 export class OperationsQueueQueryDto {
+  @IsOptional() @IsUUID() creatorTaskId?: string
   @IsOptional() @IsUUID() campaignId?: string
   @IsOptional() @IsUUID() merchantId?: string
   @IsOptional() @IsUUID() creatorId?: string

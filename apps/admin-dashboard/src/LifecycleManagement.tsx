@@ -48,6 +48,7 @@ export function LifecycleManagement({
   const [keyword, setKeyword] = useState('')
   const [status, setStatus] = useState('')
   const [agentType, setAgentType] = useState('')
+  const [page, setPage] = useState(1)
   const [selected, setSelected] = useState<string | null>(null)
   const [reasonModal, contextHolder] = Modal.useModal()
   const [taskLimitTarget, setTaskLimitTarget] = useState<CreatorLifecycle | null>(null)
@@ -55,14 +56,20 @@ export function LifecycleManagement({
   const [taskLimitSaving, setTaskLimitSaving] = useState(false)
   const queryClient = useQueryClient()
   const list = useQuery({
-    queryKey: ['lifecycle', kind, merchantAuditScope, keyword, status, agentType],
+    queryKey: ['lifecycle', kind, merchantAuditScope, keyword, status, agentType, page],
     queryFn: async (): Promise<{
       items: Row[]
       pagination: { page: number; pageSize: number; total: number; totalPages: number }
     }> =>
       kind === 'merchants'
-        ? getLifecycleMerchants({ keyword, status, auditStatus: merchantAuditScope })
-        : getLifecycleCreators({ keyword, status, agentType }),
+        ? getLifecycleMerchants({
+            keyword,
+            status,
+            auditStatus: merchantAuditScope,
+            page,
+            pageSize: 20,
+          })
+        : getLifecycleCreators({ keyword, status, agentType, page, pageSize: 20 }),
   })
   const detail = useQuery({
     queryKey: ['lifecycle-detail', kind, selected],
@@ -174,7 +181,7 @@ export function LifecycleManagement({
                 {(row as CreatorLifecycle).nickname || '未命名分享员'}
               </Typography.Text>
               <Typography.Text type="secondary">
-                微信 { (row as CreatorLifecycle).wechatOpenidMasked || '未绑定' } · {row.phone}
+                微信 {(row as CreatorLifecycle).wechatOpenidMasked || '未绑定'} · {row.phone}
               </Typography.Text>
             </Space>
           ),
@@ -182,7 +189,8 @@ export function LifecycleManagement({
         {
           title: '微信小程序身份',
           key: 'wechatIdentity',
-          render: (_, row) => (row as CreatorLifecycle).wechatOpenidMasked || <Tag color="orange">未绑定</Tag>,
+          render: (_, row) =>
+            (row as CreatorLifecycle).wechatOpenidMasked || <Tag color="orange">未绑定</Tag>,
         },
         {
           title: '身份类型',
@@ -329,15 +337,25 @@ export function LifecycleManagement({
         <Space wrap>
           <Input
             value={keyword}
-            onChange={(event) => setKeyword(event.target.value)}
-            placeholder={isMerchant ? '搜索商户名称或手机号' : '搜索昵称、手机号、微信 OpenID / UnionID'}
+            placeholder={
+              isMerchant
+                ? '搜索商户 ID、名称或手机号'
+                : '搜索达人 ID、昵称、手机号、微信 OpenID / UnionID'
+            }
             allowClear
             className="scope-input"
+            onChange={(event) => {
+              setKeyword(event.target.value)
+              setPage(1)
+            }}
           />
           {!isMerchant && (
             <Select
               value={agentType || undefined}
-              onChange={(value) => setAgentType(value ?? '')}
+              onChange={(value) => {
+                setAgentType(value ?? '')
+                setPage(1)
+              }}
               allowClear
               placeholder="全部分享员类型"
               className="scope-input"
@@ -350,7 +368,10 @@ export function LifecycleManagement({
           {canManageAccount && (
             <Select
               value={status || undefined}
-              onChange={(value) => setStatus(value ?? '')}
+              onChange={(value) => {
+                setStatus(value ?? '')
+                setPage(1)
+              }}
               allowClear
               placeholder="全部账号状态"
               className="scope-input"
@@ -384,9 +405,11 @@ export function LifecycleManagement({
             loading={list.isLoading}
             scroll={{ x: 980 }}
             pagination={{
+              current: list.data?.pagination.page ?? page,
               total: list.data?.pagination.total ?? 0,
               pageSize: list.data?.pagination.pageSize ?? 20,
               showSizeChanger: false,
+              onChange: setPage,
             }}
           />
         </Card>
@@ -515,7 +538,11 @@ function LifecycleDetailPanel({
           value={summary.publishing?.published ?? 0}
           suffix={`/ ${summary.publishing?.total ?? 0}`}
         />,
-        <Statistic key="impressions" title="内容曝光" value={summary.publishing?.impressions ?? 0} />,
+        <Statistic
+          key="impressions"
+          title="内容曝光"
+          value={summary.publishing?.impressions ?? 0}
+        />,
         <Statistic key="clicks" title="内容点击" value={summary.publishing?.clicks ?? 0} />,
       ]
   return (
@@ -543,12 +570,16 @@ function LifecycleDetailPanel({
         {!isMerchant ? (
           <>
             <Descriptions.Item label="微信小程序 OpenID">
-              <Typography.Text copyable={{ text: (profile as CreatorLifecycle).wechatOpenid ?? '' }}>
+              <Typography.Text
+                copyable={{ text: (profile as CreatorLifecycle).wechatOpenid ?? '' }}
+              >
                 {(profile as CreatorLifecycle).wechatOpenid || '未绑定'}
               </Typography.Text>
             </Descriptions.Item>
             <Descriptions.Item label="微信 UnionID">
-              <Typography.Text copyable={{ text: (profile as CreatorLifecycle).wechatUnionid ?? '' }}>
+              <Typography.Text
+                copyable={{ text: (profile as CreatorLifecycle).wechatUnionid ?? '' }}
+              >
                 {(profile as CreatorLifecycle).wechatUnionid || '微信未返回'}
               </Typography.Text>
             </Descriptions.Item>
@@ -597,29 +628,41 @@ function LifecycleDetailPanel({
                 render: (_, item) => (
                   <Space direction="vertical" size={0}>
                     <span>{item.contentType}</span>
-                    <Typography.Text type="secondary">{item.targetPlatform || '未指定平台'} · {item.status}</Typography.Text>
+                    <Typography.Text type="secondary">
+                      {item.targetPlatform || '未指定平台'} · {item.status}
+                    </Typography.Text>
                   </Space>
                 ),
               },
               {
                 title: '发布',
                 key: 'publication',
-                render: (_, item) => item.publications.length
-                  ? item.publications.map((publication) => (
-                    <div key={publication.id}>
-                      {publication.platform} · {publication.status}
-                      {publication.platformPostUrl ? <a href={publication.platformPostUrl} target="_blank" rel="noreferrer"> 查看</a> : null}
-                    </div>
-                  ))
-                  : '未发布',
+                render: (_, item) =>
+                  item.publications.length
+                    ? item.publications.map((publication) => (
+                        <div key={publication.id}>
+                          {publication.platform} · {publication.status}
+                          {publication.platformPostUrl ? (
+                            <a href={publication.platformPostUrl} target="_blank" rel="noreferrer">
+                              {' '}
+                              查看
+                            </a>
+                          ) : null}
+                        </div>
+                      ))
+                    : '未发布',
               },
               {
                 title: '获客表现',
                 key: 'performance',
                 render: (_, item) => (
                   <Space direction="vertical" size={0}>
-                    <span>曝光 {item.performance.impressions} · 点击 {item.performance.clicks}</span>
-                    <Typography.Text type="secondary">领券 {item.performance.claims}</Typography.Text>
+                    <span>
+                      曝光 {item.performance.impressions} · 点击 {item.performance.clicks}
+                    </span>
+                    <Typography.Text type="secondary">
+                      领券 {item.performance.claims}
+                    </Typography.Text>
                   </Space>
                 ),
               },

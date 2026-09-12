@@ -13,6 +13,7 @@ import { CampaignBudgetAllocation } from './entities/campaign-budget-allocation.
 import { CreatorTaskAppeal, CreatorTaskPayout } from './entities/creator-task-payout.entity'
 import { CreatorTask, GrowthTask } from './entities/growth-task.entity'
 import { CreatorPortalService } from './creator-portal.service'
+import { GrowthTaskService } from './growth-task.service'
 
 const repo = () => ({
   find: jest.fn().mockResolvedValue([]),
@@ -59,6 +60,9 @@ describe('Creator appeal adjudication accounting acceptance', () => {
     payouts = repo()
     appeals = repo()
     const wallets = repo()
+    const growthTaskService = {
+      expireOverdueCreatorTasks: jest.fn().mockResolvedValue({ expiredCount: 0, items: [] }),
+    }
     manager = {
       findOne: jest.fn(),
       create: jest.fn((_: unknown, value: unknown) => value),
@@ -85,6 +89,7 @@ describe('Creator appeal adjudication accounting acceptance', () => {
         { provide: getRepositoryToken(CreatorTaskAppeal), useValue: appeals },
         { provide: getRepositoryToken(AgentWallet), useValue: wallets },
         { provide: DataSource, useValue: dataSource },
+        { provide: GrowthTaskService, useValue: growthTaskService },
       ],
     }).compile()
     service = module.get(CreatorPortalService)
@@ -236,7 +241,11 @@ describe('Creator appeal adjudication accounting acceptance', () => {
     await service.resolveAppeal(
       'appeal-2',
       { id: 'admin-1' },
-      { decision: 'reverse_settlement', confirmedAmount: 100, resolution: '确认违规，撤销结算并追回。' },
+      {
+        decision: 'reverse_settlement',
+        confirmedAmount: 100,
+        resolution: '确认违规，撤销结算并追回。',
+      },
     )
 
     expect(payout).toMatchObject({ status: 'reversed', adjudicatedAmount: 0 })
@@ -254,23 +263,48 @@ describe('Creator appeal adjudication accounting acceptance', () => {
 
   it('rejects a financial adjudication when the independently confirmed amount differs', async () => {
     const appeal = {
-      id: 'appeal-confirmation-1', creatorTaskId: task.id, creatorId: task.creatorId,
-      merchantId: task.merchantId, appellantType: 'merchant', payoutId: 'payout-1',
-      target: 'payout', status: 'open', reason: '金额确认', evidence: {},
+      id: 'appeal-confirmation-1',
+      creatorTaskId: task.id,
+      creatorId: task.creatorId,
+      merchantId: task.merchantId,
+      appellantType: 'merchant',
+      payoutId: 'payout-1',
+      target: 'payout',
+      status: 'open',
+      reason: '金额确认',
+      evidence: {},
     }
     const payout = {
-      id: 'payout-1', creatorTaskId: task.id, creatorId: task.creatorId,
-      merchantId: task.merchantId, campaignId: task.campaignId, status: 'settled',
-      expectedAmount: 100, verifiedAmount: 100,
+      id: 'payout-1',
+      creatorTaskId: task.id,
+      creatorId: task.creatorId,
+      merchantId: task.merchantId,
+      campaignId: task.campaignId,
+      status: 'settled',
+      expectedAmount: 100,
+      verifiedAmount: 100,
     }
     manager.findOne.mockImplementation((entity: unknown) =>
-      entity === CreatorTaskAppeal ? appeal : entity === CreatorTask ? task : entity === CreatorTaskPayout ? payout : null,
+      entity === CreatorTaskAppeal
+        ? appeal
+        : entity === CreatorTask
+          ? task
+          : entity === CreatorTaskPayout
+            ? payout
+            : null,
     )
 
     await expect(
-      service.resolveAppeal('appeal-confirmation-1', { id: 'admin-1' }, {
-        decision: 'adjust_payout', adjustedAmount: 80, confirmedAmount: 81, resolution: '确认金额不一致。',
-      }),
+      service.resolveAppeal(
+        'appeal-confirmation-1',
+        { id: 'admin-1' },
+        {
+          decision: 'adjust_payout',
+          adjustedAmount: 80,
+          confirmedAmount: 81,
+          resolution: '确认金额不一致。',
+        },
+      ),
     ).rejects.toBeInstanceOf(BadRequestException)
     expect(manager.save).not.toHaveBeenCalled()
   })

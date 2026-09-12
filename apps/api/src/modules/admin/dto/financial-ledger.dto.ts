@@ -80,3 +80,13 @@ export class CampaignEconomicsQueryDto {
   @IsUUID()
   merchantId?: string
 }
+
+export class FinanceReconciliationQueryDto {
+  @IsOptional()
+  @IsUUID()
+  merchantId?: string
+
+  @IsOptional()
+  @IsUUID()
+  creatorId?: string
+}

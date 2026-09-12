@@ -25,7 +25,8 @@ import {
   CreatorTaskAppealStatus,
   CreatorTaskPayout,
 } from './entities/creator-task-payout.entity'
-import { CreatorTask, GrowthTask } from './entities/growth-task.entity'
+import { CreatorTask, CreatorTaskStatus, GrowthTask } from './entities/growth-task.entity'
+import { GrowthTaskService } from './growth-task.service'
 
 @Injectable()
 export class CreatorPortalService {
@@ -39,6 +40,7 @@ export class CreatorPortalService {
     @InjectRepository(CreatorTaskAppeal) private readonly appeals: Repository<CreatorTaskAppeal>,
     @InjectRepository(AgentWallet) private readonly wallets: Repository<AgentWallet>,
     private readonly dataSource: DataSource,
+    private readonly growthTaskService: GrowthTaskService,
   ) {}
 
   async profile(creatorId: string) {
@@ -78,6 +80,7 @@ export class CreatorPortalService {
 
   async today(creatorId: string) {
     const creator = await this.creator(creatorId)
+    await this.growthTaskService.expireOverdueCreatorTasks(creatorId)
     const items = await this.enrich(
       await this.tasks.find({ where: { creatorId }, order: { deadline: 'ASC' } }),
     )
@@ -87,9 +90,15 @@ export class CreatorPortalService {
         (item) => item.status === 'invited' && item.funded && item.deadline > new Date(),
       ),
       activeTasks: items.filter((item) =>
-        ['accepted', 'creating', 'submitted', 'approved', 'published', 'tracking'].includes(
-          item.status,
-        ),
+        [
+          'accepted',
+          'creating',
+          'submitted',
+          'approved',
+          'published',
+          'tracking',
+          'risk_hold',
+        ].includes(item.status),
       ),
       pendingSettlement: items.filter((item) =>
         ['verified', 'risk_hold'].includes(item.payout.status),
@@ -97,8 +106,9 @@ export class CreatorPortalService {
     }
   }
   async listTasks(creatorId: string, query: CreatorTaskListQueryDto) {
-    const page = Number(query.page ?? 1),
-      pageSize = Math.min(Number(query.pageSize ?? 20), 100)
+    await this.growthTaskService.expireOverdueCreatorTasks(creatorId)
+    const page = Math.max(Number(query.page ?? 1) || 1, 1),
+      pageSize = Math.min(Math.max(Number(query.pageSize ?? 20) || 20, 1), 100)
     const where: Record<string, string> = { creatorId }
     if (query.status) where.status = query.status
     const [tasks, total] = await this.tasks.findAndCount({
@@ -113,6 +123,7 @@ export class CreatorPortalService {
     }
   }
   async task(creatorId: string, taskId: string) {
+    await this.growthTaskService.expireOverdueCreatorTasks(creatorId)
     const task = await this.tasks.findOne({ where: { id: taskId, creatorId } })
     if (!task) throw new NotFoundException('创作者任务不存在')
     return (await this.enrich([task]))[0]
@@ -238,17 +249,20 @@ export class CreatorPortalService {
     // A wallet can contain receivables from several rulings. Operations must
     // work from the ruling, otherwise an operator cannot explain which payout
     // cleared which debt.
-    const appeals = (await this.appeals.find({
-      where: {
-        status: 'accepted',
-        adjudicationDecision: 'reverse_settlement',
-        ...(query.creatorId ? { creatorId: query.creatorId } : {}),
-      },
-      order: { resolvedAt: 'ASC', createdAt: 'ASC' },
-    })).filter(
+    const appeals = (
+      await this.appeals.find({
+        where: {
+          status: 'accepted',
+          adjudicationDecision: 'reverse_settlement',
+          ...(query.creatorId ? { creatorId: query.creatorId } : {}),
+        },
+        order: { resolvedAt: 'ASC', createdAt: 'ASC' },
+      })
+    ).filter(
       (appeal) =>
-        this.money(Number(appeal.recoveryAmount ?? 0) - Number(appeal.recoveryRecoveredAmount ?? 0)) >
-        0,
+        this.money(
+          Number(appeal.recoveryAmount ?? 0) - Number(appeal.recoveryRecoveredAmount ?? 0),
+        ) > 0,
     )
     const sourceReferences = appeals.map((appeal) => `appeal:${appeal.id}`)
     const financialEntries = sourceReferences.length
@@ -264,7 +278,9 @@ export class CreatorPortalService {
       entriesByAppealId.set(appealId, [...(entriesByAppealId.get(appealId) ?? []), entry])
     }
     const wallets = appeals.length
-      ? await this.wallets.find({ where: { agentId: In(appeals.map((appeal) => appeal.creatorId)) } })
+      ? await this.wallets.find({
+          where: { agentId: In(appeals.map((appeal) => appeal.creatorId)) },
+        })
       : []
     const creators = appeals.length
       ? await this.creators.find({ where: { id: In(appeals.map((appeal) => appeal.creatorId)) } })
@@ -320,7 +336,10 @@ export class CreatorPortalService {
             : null,
         }
       })
-      .filter((item) => query.riskLevel === 'all' || !query.riskLevel || item.risk.level === query.riskLevel)
+      .filter(
+        (item) =>
+          query.riskLevel === 'all' || !query.riskLevel || item.risk.level === query.riskLevel,
+      )
       .sort((left, right) => right.daysWithoutOffset - left.daysWithoutOffset)
     const total = items.length
     return {
@@ -354,8 +373,9 @@ export class CreatorPortalService {
     ])
     const outstandingAppeals = recoveryAppeals.filter(
       (appeal) =>
-        this.money(Number(appeal.recoveryAmount ?? 0) - Number(appeal.recoveryRecoveredAmount ?? 0)) >
-        0,
+        this.money(
+          Number(appeal.recoveryAmount ?? 0) - Number(appeal.recoveryRecoveredAmount ?? 0),
+        ) > 0,
     )
     const expectedReceivable = this.money(
       outstandingAppeals.reduce(
@@ -496,14 +516,14 @@ export class CreatorPortalService {
         amountAfter = this.money(Number(dto.adjustedAmount))
         this.assertConfirmedAmount(dto.confirmedAmount, amountAfter, '调整后金额')
         const delta = this.money(amountAfter - amountBefore)
-        await this.applyPayoutAdjustment(manager, payout!, delta)
-        payout!.adjudicatedAmount = amountAfter
-        payout!.adjudicatedAt = new Date()
-        await manager.save(payout!)
+        await this.applyPayoutAdjustment(manager, payout, delta)
+        payout.adjudicatedAmount = amountAfter
+        payout.adjudicatedAt = new Date()
+        await manager.save(payout)
         if (delta !== 0) {
           const entry = await this.recordAdjudicationLedger(manager, {
             appeal: current,
-            payout: payout!,
+            payout: payout,
             actorId: actor.id,
             amount: delta,
             entryType: 'appeal_payout_adjustment',
@@ -515,14 +535,14 @@ export class CreatorPortalService {
         }
       }
       if (decision === 'reverse_settlement') {
-        if (!['verified', 'settled'].includes(payout!.status))
+        if (!['verified', 'settled'].includes(payout.status))
           throw new BadRequestException('仅已核验或已结算的报酬可撤销/追回')
         this.assertConfirmedAmount(dto.confirmedAmount, amountBefore, '追回金额')
-        const recoveredNow = await this.reversePayout(manager, payout!, amountBefore)
-        payout!.adjudicatedAmount = 0
-        payout!.adjudicatedAt = new Date()
-        payout!.status = 'reversed'
-        await manager.save(payout!)
+        const recoveredNow = await this.reversePayout(manager, payout, amountBefore)
+        payout.adjudicatedAmount = 0
+        payout.adjudicatedAt = new Date()
+        payout.status = 'reversed'
+        await manager.save(payout)
         amountAfter = 0
         current.recoveryAmount = amountBefore
         current.recoveryRecoveredAmount = recoveredNow
@@ -530,7 +550,7 @@ export class CreatorPortalService {
         if (amountBefore !== 0) {
           const entry = await this.recordAdjudicationLedger(manager, {
             appeal: current,
-            payout: payout!,
+            payout: payout,
             actorId: actor.id,
             amount: -amountBefore,
             entryType: 'appeal_payout_reversal',
@@ -637,12 +657,14 @@ export class CreatorPortalService {
       })
       if (!payout) throw new BadRequestException('任务尚未接受')
       if (payout.status !== 'estimated') throw new BadRequestException('仅待核验报酬可核验')
-      const amount = Number(dto.verifiedAmount),
-        settleAt = this.addBusinessDays(new Date(), 3)
+      const amount = this.money(Number(dto.verifiedAmount))
+      if (!Number.isFinite(amount) || amount < 0) throw new BadRequestException('核验报酬金额异常')
+      const verifiedAt = new Date()
+      const settleAt = this.addBusinessDays(verifiedAt, 3)
       payout.status = 'verified'
       payout.verifiedAmount = amount
       payout.verificationEvidence = dto.evidence ?? {}
-      payout.verifiedAt = new Date()
+      payout.verifiedAt = verifiedAt
       payout.settleAt = settleAt
       payout.recoveryOffsetAmount = 0
       await manager.save(payout)
@@ -665,9 +687,31 @@ export class CreatorPortalService {
           aiTokenBalance: 0,
           status: true,
         })
-      wallet.pendingSettlementBalance = Number(wallet.pendingSettlementBalance) + amount
-      wallet.totalEarned = Number(wallet.totalEarned) + amount
+      wallet.pendingSettlementBalance = this.money(Number(wallet.pendingSettlementBalance) + amount)
+      wallet.totalEarned = this.money(Number(wallet.totalEarned) + amount)
       await manager.save(wallet)
+      if (amount > 0)
+        await manager.save(FinancialLedgerEntry, {
+          classification: 'cogs',
+          entryType: 'creator_task_payout',
+          amount,
+          currency: 'CNY',
+          merchantId: task.merchantId,
+          campaignId: task.campaignId ?? null,
+          creatorId: task.creatorId,
+          creatorTaskId: task.id,
+          sourceReference: payout.id,
+          idempotencyKey: `creator-task-payout:${payout.id}:verified`,
+          recordedByAdminId: actorId,
+          occurredAt: verifiedAt,
+          description: 'Creator Payout COGS',
+          metadata: {
+            payoutId: payout.id,
+            verifiedAmount: amount,
+            status: 'verified',
+            settleAt,
+          },
+        })
       await manager.save(AuditLog, {
         actorType: 'admin',
         actorId,
@@ -675,7 +719,13 @@ export class CreatorPortalService {
         actionDescription: 'creator_task_payout_verified',
         targetType: 'creator_task_payout',
         targetId: payout.id,
-        metadata: { taskId, amount, settleAt, recoveryOffsetAmount: 0, evidence: dto.evidence ?? {} },
+        metadata: {
+          taskId,
+          amount,
+          settleAt,
+          recoveryOffsetAmount: 0,
+          evidence: dto.evidence ?? {},
+        },
         result: 'success',
       })
       await manager.save(Notification, {
@@ -707,14 +757,18 @@ export class CreatorPortalService {
     const byPayout = new Map(payouts.map((item) => [item.creatorTaskId, item]))
     const categories = new Map<string, Set<string>>()
     const reasons = new Map<string, unknown>()
+    const auditsByTask = new Map<string, AuditLog[]>()
     for (const item of allocations)
       categories.set(
         item.growthTaskId,
         new Set([...(categories.get(item.growthTaskId) ?? []), item.category]),
       )
-    for (const audit of audits)
+    for (const audit of audits) {
+      if (!audit.targetId || audit.targetType !== 'creator_task') continue
+      auditsByTask.set(audit.targetId, [...(auditsByTask.get(audit.targetId) ?? []), audit])
       if (audit.actionDescription === 'creator_task_matched_and_invited')
-        reasons.set(audit.targetId, (audit.metadata as Record<string, unknown>).matching)
+        reasons.set(audit.targetId, (audit.metadata as Record<string, unknown>)?.matching)
+    }
     return tasks.map((task) => {
       const funded =
         byGrowth.get(task.growthTaskId)?.status === 'active' &&
@@ -732,6 +786,10 @@ export class CreatorPortalService {
         status: task.status,
         funded,
         matchingReason: reasons.get(task.id) ?? null,
+        lifecycle: this.lifecycle(task, funded, auditsByTask.get(task.id) ?? []),
+        stateReason: task.stateReason ?? task.riskHoldReason ?? null,
+        stateChangedBy: task.stateChangedBy ?? null,
+        stateChangedAt: task.stateChangedAt ?? null,
         expectedPayout: Number(task.baseReward),
         performanceReward: task.performanceReward,
         campaignCredits: {
@@ -745,6 +803,76 @@ export class CreatorPortalService {
         payout: this.payout(byPayout.get(task.id)),
       }
     })
+  }
+
+  private lifecycle(task: CreatorTask, funded: boolean, audits: AuditLog[]) {
+    const states: CreatorTaskStatus[] = [
+      'created',
+      'matching',
+      'invited',
+      'accepted',
+      'creating',
+      'submitted',
+      'approved',
+      'published',
+      'tracking',
+      'completed',
+      'settled',
+    ]
+    const currentState =
+      task.status === 'risk_hold' ? (task.riskHoldPreviousStatus ?? 'accepted') : task.status
+    const index = states.indexOf(currentState)
+    const actions: string[] = []
+    if (task.status === 'invited' && task.deadline > new Date()) {
+      actions.push('decline')
+      if (funded) actions.unshift('accept')
+    } else if (task.status === 'accepted') actions.push('start')
+    else if (task.status === 'creating') actions.push('submit')
+    else if (task.status === 'rejected') actions.push('start')
+    else if (task.status === 'approved') actions.push('publish')
+    else if (task.status === 'published') actions.push('tracking')
+    else if (task.status === 'tracking') actions.push('complete')
+    if (['rejected', 'completed', 'settled', 'violation', 'risk_hold'].includes(task.status))
+      actions.push('appeal')
+    const history = audits
+      .filter((audit) =>
+        [
+          AuditActionType.CREATOR_TASK_TRANSITION,
+          AuditActionType.CREATOR_TASK_REVIEWED,
+          AuditActionType.CREATOR_TASK_RISK_HELD,
+        ].includes(audit.actionType),
+      )
+      .sort((left, right) => left.createdAt.getTime() - right.createdAt.getTime())
+      .map((audit) => {
+        const metadata = audit.metadata ?? {}
+        return {
+          action: audit.actionDescription,
+          fromStatus: typeof metadata.before === 'string' ? metadata.before : null,
+          toStatus: typeof metadata.after === 'string' ? metadata.after : null,
+          reason:
+            typeof metadata.reason === 'string'
+              ? metadata.reason
+              : typeof metadata.reviewReason === 'string'
+                ? metadata.reviewReason
+                : null,
+          actorType: audit.actorType,
+          actorId: audit.actorId ?? null,
+          occurredAt: audit.createdAt,
+        }
+      })
+    return {
+      currentStatus: task.status,
+      progress: {
+        currentStep: index < 0 ? 0 : index + 1,
+        totalSteps: states.length,
+        percent: index < 0 ? 0 : Math.round(((index + 1) / states.length) * 100),
+      },
+      availableActions: actions,
+      stateReason: task.stateReason ?? task.riskHoldReason ?? null,
+      stateChangedBy: task.stateChangedBy ?? null,
+      stateChangedAt: task.stateChangedAt ?? null,
+      history,
+    }
   }
   private appealQuery(query: ListCreatorTaskAppealsDto) {
     const builder = this.appeals
@@ -778,9 +906,7 @@ export class CreatorPortalService {
     if (!appeals.length) return []
     const taskIds = [...new Set(appeals.map((item) => item.creatorTaskId))]
     const creatorIds = [...new Set(appeals.map((item) => item.creatorId))]
-    const ledgerIds = [
-      ...new Set(appeals.flatMap((item) => item.financialLedgerEntryIds ?? [])),
-    ]
+    const ledgerIds = [...new Set(appeals.flatMap((item) => item.financialLedgerEntryIds ?? []))]
     const [tasks, payouts, creators, financialEntries] = await Promise.all([
       this.tasks.find({ where: { id: In(taskIds) } }),
       this.payouts.find({ where: { creatorTaskId: In(taskIds) } }),
@@ -823,7 +949,10 @@ export class CreatorPortalService {
           amount: Number(appeal.recoveryAmount ?? 0),
           recovered: Number(appeal.recoveryRecoveredAmount ?? 0),
           remaining: this.money(
-            Math.max(0, Number(appeal.recoveryAmount ?? 0) - Number(appeal.recoveryRecoveredAmount ?? 0)),
+            Math.max(
+              0,
+              Number(appeal.recoveryAmount ?? 0) - Number(appeal.recoveryRecoveredAmount ?? 0),
+            ),
           ),
           status:
             Number(appeal.recoveryAmount ?? 0) === 0

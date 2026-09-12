@@ -22,7 +22,7 @@ import {
 } from './entities/growth-task.entity'
 
 interface Actor {
-  id: string
+  id: string | null
   type: 'merchant' | 'creator' | 'admin' | 'system'
 }
 const TERMINAL_CREATOR_STATES: CreatorTaskStatus[] = [
@@ -219,6 +219,7 @@ export class GrowthTaskService {
     merchantId: string,
     creatorTaskId: string,
     target: CreatorTaskStatus,
+    reason?: string,
   ) {
     if (!['matching', 'invited', 'cancelled'].includes(target))
       throw new BadRequestException('商户不能执行该创作者任务流转')
@@ -226,7 +227,7 @@ export class GrowthTaskService {
       creatorTaskId,
       target,
       { id: merchantId, type: 'merchant' },
-      { merchantId },
+      { merchantId, ...(reason ? { stateReason: reason } : {}) },
     )
   }
 
@@ -238,7 +239,15 @@ export class GrowthTaskService {
     stateReason?: string,
   ) {
     if (
-      !['accepted', 'declined', 'creating', 'submitted', 'published', 'tracking', 'completed'].includes(target)
+      ![
+        'accepted',
+        'declined',
+        'creating',
+        'submitted',
+        'published',
+        'tracking',
+        'completed',
+      ].includes(target)
     )
       throw new BadRequestException('创作者不能执行该任务流转')
     return this.transitionCreatorTask(
@@ -247,6 +256,63 @@ export class GrowthTaskService {
       { id: creatorId, type: 'creator' },
       { creatorId, publishedUrl, stateReason },
     )
+  }
+
+  async declineCreatorTask(creatorId: string, creatorTaskId: string, reason: string) {
+    return this.transitionCreatorTask(
+      creatorTaskId,
+      'cancelled',
+      { id: creatorId, type: 'creator' },
+      { creatorId, stateReason: reason },
+    )
+  }
+
+  async expireOverdueCreatorTasks(creatorId?: string) {
+    return this.dataSource.transaction(async (manager) => {
+      const candidates = await manager.find(CreatorTask, {
+        where: creatorId ? { creatorId, status: 'invited' } : { status: 'invited' },
+      })
+      const now = new Date()
+      const expired: CreatorTask[] = []
+      for (const candidate of candidates) {
+        if (candidate.deadline > now) continue
+        const task = await manager.findOne(CreatorTask, {
+          where: { id: candidate.id },
+          lock: { mode: 'pessimistic_write' },
+        })
+        if (!task || task.status !== 'invited' || task.deadline > now) continue
+        task.status = 'expired'
+        task.stateReason = '邀约已超过截止时间'
+        task.stateChangedBy = null
+        task.stateChangedAt = now
+        await manager.save(task)
+        await this.audit(
+          manager,
+          { id: null, type: 'system' },
+          AuditActionType.CREATOR_TASK_TRANSITION,
+          'creator_task',
+          task.id,
+          {
+            before: 'invited',
+            after: 'expired',
+            reason: task.stateReason,
+            deadline: task.deadline,
+          },
+        )
+        await manager.save(Notification, {
+          recipientId: task.creatorId,
+          recipientRole: UserRole.AGENT,
+          type: 'creator_task_expired',
+          title: '创作者任务邀约已过期',
+          body: '该任务邀约已超过截止时间，不能再接受。',
+          targetType: 'creator_task',
+          targetId: task.id,
+          metadata: { deadline: task.deadline, reason: task.stateReason },
+        })
+        expired.push(task)
+      }
+      return { expiredCount: expired.length, items: expired }
+    })
   }
 
   async reviewCreatorTask(
@@ -260,7 +326,7 @@ export class GrowthTaskService {
       creatorTaskId,
       target,
       { id: actorId, type: 'admin' },
-      { reviewReason: reason, reviewedBy: actorId, reviewedAt: new Date() },
+      { reviewReason: reason, stateReason: reason, reviewedBy: actorId, reviewedAt: new Date() },
       AuditActionType.CREATOR_TASK_REVIEWED,
     )
     await this.notifyCreator(
@@ -369,7 +435,8 @@ export class GrowthTaskService {
       if (payout) {
         if (action === 'violation') {
           const previousStatus = this.payoutStatusBeforeRiskHold(payout)
-          if (previousStatus === 'verified') await this.reversePendingPayout(manager, payout)
+          if (previousStatus === 'verified')
+            await this.reversePendingPayout(manager, payout, actorId, reason)
           payout.status = 'rejected'
           payout.riskHoldPreviousStatus = null
           payout.riskHoldReason = reason
@@ -444,7 +511,7 @@ export class GrowthTaskService {
     sourceReference: string,
   ) {
     return this.dataSource.transaction(async (manager) => {
-      const task = await this.requireCreatorTask(manager, creatorTaskId)
+      const task = await this.requireCreatorTask(manager, creatorTaskId, true)
       if (task.creatorId !== creatorId) throw new NotFoundException('创作者任务不存在')
       if (!['accepted', 'creating'].includes(task.status))
         throw new BadRequestException('仅已接受或创作中的商业任务可消耗 Campaign Credits')
@@ -537,7 +604,7 @@ export class GrowthTaskService {
     action = AuditActionType.CREATOR_TASK_TRANSITION,
   ) {
     return this.dataSource.transaction(async (manager) => {
-      const task = await this.requireCreatorTask(manager, creatorTaskId)
+      const task = await this.requireCreatorTask(manager, creatorTaskId, true)
       if (options.merchantId && task.merchantId !== options.merchantId)
         throw new NotFoundException('创作者任务不存在')
       if (options.creatorId && task.creatorId !== options.creatorId)
@@ -546,6 +613,8 @@ export class GrowthTaskService {
         throw new BadRequestException(`创作者任务不能从 ${task.status} 变更为 ${target}`)
       if (target === 'published' && !options.publishedUrl)
         throw new BadRequestException('发布任务必须提供 publishedUrl')
+      if (target === 'cancelled' && !options.stateReason)
+        throw new BadRequestException('取消任务必须提供原因')
       if (target === 'accepted') {
         const creator = await manager.findOne(SharingAgent, { where: { id: task.creatorId } })
         if (
@@ -655,7 +724,12 @@ export class GrowthTaskService {
     return task
   }
 
-  private async reversePendingPayout(manager: EntityManager, payout: CreatorTaskPayout) {
+  private async reversePendingPayout(
+    manager: EntityManager,
+    payout: CreatorTaskPayout,
+    actorId: string,
+    reason: string,
+  ) {
     const amount = Number(payout.verifiedAmount ?? 0)
     if (!Number.isFinite(amount) || amount < 0)
       throw new BadRequestException('核验报酬金额异常，无法冲销违规报酬')
@@ -672,6 +746,76 @@ export class GrowthTaskService {
     wallet.pendingSettlementBalance = this.money(pending - amount)
     wallet.totalEarned = this.money(totalEarned - amount)
     await manager.save(wallet)
+    const verifiedEntryIdempotencyKey = `creator-task-payout:${payout.id}:verified`
+    const verifiedEntry = await manager.findOne(FinancialLedgerEntry, {
+      where: [
+        { idempotencyKey: verifiedEntryIdempotencyKey },
+        {
+          classification: 'cogs',
+          entryType: 'creator_task_payout',
+          sourceReference: payout.id,
+        },
+        {
+          classification: 'cogs',
+          entryType: 'creator_task_payout',
+          creatorTaskId: payout.creatorTaskId,
+        },
+        {
+          classification: 'cogs',
+          entryType: 'creator_payout',
+          sourceReference: payout.id,
+        },
+        {
+          classification: 'cogs',
+          entryType: 'creator_payout',
+          creatorTaskId: payout.creatorTaskId,
+        },
+      ],
+    })
+    if (!verifiedEntry)
+      await manager.save(FinancialLedgerEntry, {
+        classification: 'cogs',
+        entryType: 'creator_task_payout',
+        amount,
+        currency: 'CNY',
+        merchantId: payout.merchantId,
+        campaignId: payout.campaignId ?? null,
+        creatorId: payout.creatorId,
+        creatorTaskId: payout.creatorTaskId,
+        sourceReference: payout.id,
+        idempotencyKey: verifiedEntryIdempotencyKey,
+        recordedByAdminId: actorId,
+        occurredAt: payout.verifiedAt ?? new Date(),
+        description: 'Creator Payout COGS',
+        metadata: {
+          payoutId: payout.id,
+          verifiedAmount: amount,
+          status: 'verified',
+          settleAt: payout.settleAt ?? null,
+          reconstructedAtReversal: true,
+        },
+      })
+    await manager.save(FinancialLedgerEntry, {
+      classification: 'cogs',
+      entryType: 'creator_payout_reversal',
+      amount: this.money(-amount),
+      currency: 'CNY',
+      merchantId: payout.merchantId,
+      campaignId: payout.campaignId ?? null,
+      creatorId: payout.creatorId,
+      creatorTaskId: payout.creatorTaskId,
+      sourceReference: payout.id,
+      idempotencyKey: `creator-task-payout:${payout.id}:reversal`,
+      recordedByAdminId: actorId,
+      occurredAt: new Date(),
+      description: 'Creator Payout Reversal',
+      metadata: {
+        payoutId: payout.id,
+        reversedAmount: amount,
+        reversesEntryIdempotencyKey: verifiedEntryIdempotencyKey,
+        reason,
+      },
+    })
   }
 
   private payoutStatusBeforeRiskHold(payout: CreatorTaskPayout): 'estimated' | 'verified' {

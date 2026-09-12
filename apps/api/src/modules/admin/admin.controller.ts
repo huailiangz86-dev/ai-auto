@@ -33,11 +33,17 @@ import {
   ModerateContentDto,
   ListPendingMerchantsDto,
   ListPendingAgentsDto,
+  ListFraudAlertsDto,
+  ListContentModerationDto,
   SetCreatorGrowthScoreDto,
   BlacklistCreatorDto,
 } from './dto/admin-audit.dto'
 import { DashboardQueryDto } from './dto/dashboard.dto'
-import { CampaignEconomicsQueryDto, CreateFinancialLedgerEntryDto } from './dto/financial-ledger.dto'
+import {
+  CampaignEconomicsQueryDto,
+  CreateFinancialLedgerEntryDto,
+  FinanceReconciliationQueryDto,
+} from './dto/financial-ledger.dto'
 
 @ApiTags('运营后台 API')
 @Controller('admin')
@@ -159,7 +165,10 @@ export class AdminController {
     @Param('agentId') agentId: string,
     @Body() dto: SetCreatorGrowthScoreDto,
   ) {
-    return this.adminService.setCreatorGrowthScore(agentId, dto, { id: user.id, name: user.username })
+    return this.adminService.setCreatorGrowthScore(agentId, dto, {
+      id: user.id,
+      name: user.username,
+    })
   }
 
   @Post('creators/:agentId/blacklist')
@@ -179,12 +188,8 @@ export class AdminController {
   @Get('fraud/alerts')
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   @ApiOperation({ summary: '风控告警列表' })
-  async listFraudAlerts(
-    @Query('severity') severity: string,
-    @Query('page') page: number,
-    @Query('pageSize') pageSize: number,
-  ) {
-    return this.adminService.listFraudAlerts(severity, page, pageSize)
+  async listFraudAlerts(@Query() query: ListFraudAlertsDto) {
+    return this.adminService.listFraudAlerts(query.severity, query.page, query.pageSize, query)
   }
 
   @Post('fraud/alerts/:alertId/resolve')
@@ -235,6 +240,13 @@ export class AdminController {
     return this.adminService.listFinanceReconciliations(status, page, pageSize)
   }
 
+  @Get('finance/reconciliation-overview')
+  @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  @ApiOperation({ summary: '财务对账总览：内部总账、商户预算、创作者结算与追回款' })
+  async getFinanceReconciliationOverview(@Query() query: FinanceReconciliationQueryDto) {
+    return { code: 0, data: await this.adminService.getFinanceReconciliationOverview(query) }
+  }
+
   @Post('finance/reconciliations/:revenueId/settle')
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   @HttpCode(HttpStatus.OK)
@@ -250,12 +262,8 @@ export class AdminController {
   @Get('contents/moderation')
   @Roles(UserRole.ADMIN, UserRole.SUPER_ADMIN)
   @ApiOperation({ summary: 'AI 内容审核队列' })
-  async listContentModeration(
-    @Query('status') status?: string,
-    @Query('page') page?: number,
-    @Query('pageSize') pageSize?: number,
-  ) {
-    return this.adminService.listContentModeration(status, page, pageSize)
+  async listContentModeration(@Query() query: ListContentModerationDto) {
+    return this.adminService.listContentModeration(query)
   }
 
   @Post('contents/:contentId/moderation')

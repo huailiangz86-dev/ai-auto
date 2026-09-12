@@ -69,6 +69,7 @@ import {
   getPendingAgents,
   getPendingMerchants,
   getReconciliations,
+  getFinanceReconciliationOverview,
   moderateContent,
   rejectAgent,
   rejectMerchant,
@@ -78,6 +79,9 @@ import {
   type ModerationContent,
   type OperationAuditLog,
   type Reconciliation,
+  type FinanceReconciliationOverview,
+  type FinanceMerchantReconciliation,
+  type FinanceCreatorReconciliation,
   getCreatorTaskReviewQueue,
   getCreatorTaskRiskQueue,
   getCreatorTaskWorkbench,
@@ -546,6 +550,25 @@ function OperationsPage({ activeKey }: { activeKey: string }) {
   const [auditDetailMerchantId, setAuditDetailMerchantId] = useState<string | null>(null)
   const [economicsCampaignId, setEconomicsCampaignId] = useState('')
   const [economicsMerchantId, setEconomicsMerchantId] = useState('')
+  const [financeMerchantId, setFinanceMerchantId] = useState('')
+  const [financeCreatorId, setFinanceCreatorId] = useState('')
+  const [fraudSeverity, setFraudSeverity] = useState('')
+  const [fraudStatus, setFraudStatus] = useState('pending')
+  const [fraudType, setFraudType] = useState('')
+  const [fraudMerchantId, setFraudMerchantId] = useState('')
+  const [fraudCreatorId, setFraudCreatorId] = useState('')
+  const [fraudPage, setFraudPage] = useState(1)
+  const [contentStatus, setContentStatus] = useState('pending')
+  const [contentType, setContentType] = useState('')
+  const [contentPlatform, setContentPlatform] = useState('')
+  const [contentMerchantId, setContentMerchantId] = useState('')
+  const [contentCreatorId, setContentCreatorId] = useState('')
+  const [contentCampaignId, setContentCampaignId] = useState('')
+  const [contentTaskId, setContentTaskId] = useState('')
+  const [contentPage, setContentPage] = useState(1)
+  const [auditTargetType, setAuditTargetType] = useState('')
+  const [auditTargetId, setAuditTargetId] = useState('')
+  const [auditPage, setAuditPage] = useState(1)
   const [appealsStatus, setAppealsStatus] = useState<CreatorTaskAppeal['status'] | 'all'>('open')
   const [appealsTarget, setAppealsTarget] = useState<CreatorTaskAppeal['target'] | ''>('')
   const [appealsMerchantId, setAppealsMerchantId] = useState('')
@@ -568,13 +591,39 @@ function OperationsPage({ activeKey }: { activeKey: string }) {
     enabled: key === 'agents',
   })
   const fraud = useQuery({
-    queryKey: ['fraud-alerts'],
-    queryFn: getFraudAlerts,
+    queryKey: [
+      'fraud-alerts',
+      fraudSeverity,
+      fraudStatus,
+      fraudType,
+      fraudMerchantId,
+      fraudCreatorId,
+      fraudPage,
+    ],
+    queryFn: () =>
+      getFraudAlerts({
+        severity: fraudSeverity || undefined,
+        status: fraudStatus || undefined,
+        alertType: fraudType || undefined,
+        merchantId: fraudMerchantId || undefined,
+        agentId: fraudCreatorId || undefined,
+        page: fraudPage,
+        pageSize: 20,
+      }),
     enabled: key === 'fraud',
   })
   const finance = useQuery({
     queryKey: ['finance-reconciliations'],
     queryFn: getReconciliations,
+    enabled: key === 'finance',
+  })
+  const financeOverview = useQuery({
+    queryKey: ['finance-reconciliation-overview', financeMerchantId, financeCreatorId],
+    queryFn: () =>
+      getFinanceReconciliationOverview({
+        merchantId: financeMerchantId || undefined,
+        creatorId: financeCreatorId || undefined,
+      }),
     enabled: key === 'finance',
   })
   const economics = useQuery({
@@ -587,8 +636,29 @@ function OperationsPage({ activeKey }: { activeKey: string }) {
     enabled: key === 'economics',
   })
   const contents = useQuery({
-    queryKey: ['moderation-contents'],
-    queryFn: getModerationContents,
+    queryKey: [
+      'moderation-contents',
+      contentStatus,
+      contentType,
+      contentPlatform,
+      contentMerchantId,
+      contentCreatorId,
+      contentCampaignId,
+      contentTaskId,
+      contentPage,
+    ],
+    queryFn: () =>
+      getModerationContents({
+        status: contentStatus,
+        contentType: contentType || undefined,
+        targetPlatform: contentPlatform || undefined,
+        merchantId: contentMerchantId || undefined,
+        creatorId: contentCreatorId || undefined,
+        campaignId: contentCampaignId || undefined,
+        creatorTaskId: contentTaskId || undefined,
+        page: contentPage,
+        pageSize: 20,
+      }),
     enabled: key === 'content',
   })
   const appeals = useQuery({
@@ -614,8 +684,14 @@ function OperationsPage({ activeKey }: { activeKey: string }) {
     enabled: key === 'appeals',
   })
   const auditLogs = useQuery({
-    queryKey: ['operation-audit-logs'],
-    queryFn: getOperationAuditLogs,
+    queryKey: ['operation-audit-logs', auditTargetType, auditTargetId, auditPage],
+    queryFn: () =>
+      getOperationAuditLogs({
+        targetType: auditTargetType || undefined,
+        targetId: auditTargetId || undefined,
+        page: auditPage,
+        pageSize: 20,
+      }),
     enabled: key === 'audit',
   })
   const pilot = useQuery({
@@ -630,7 +706,10 @@ function OperationsPage({ activeKey }: { activeKey: string }) {
     if (key === 'merchants') void merchants.refetch()
     if (key === 'agents') void agents.refetch()
     if (key === 'fraud') void fraud.refetch()
-    if (key === 'finance') void finance.refetch()
+    if (key === 'finance') {
+      void finance.refetch()
+      void financeOverview.refetch()
+    }
     if (key === 'economics') void economics.refetch()
     if (key === 'content') void contents.refetch()
     if (key === 'appeals') void appeals.refetch()
@@ -664,7 +743,7 @@ function OperationsPage({ activeKey }: { activeKey: string }) {
     relationships: false,
     'creator-review': false,
     'risk-holds': false,
-    finance: finance.isLoading,
+    finance: finance.isLoading || financeOverview.isLoading,
     economics: economics.isLoading,
     fraud: fraud.isLoading,
     content: contents.isLoading,
@@ -678,7 +757,7 @@ function OperationsPage({ activeKey }: { activeKey: string }) {
     relationships: null,
     'creator-review': null,
     'risk-holds': null,
-    finance: finance.error,
+    finance: finance.error ?? financeOverview.error,
     economics: economics.error,
     fraud: fraud.error,
     content: contents.error,
@@ -750,7 +829,11 @@ function OperationsPage({ activeKey }: { activeKey: string }) {
         {auditMerchantDetail.isLoading ? (
           <Skeleton active />
         ) : auditMerchantDetail.isError ? (
-          <Result status="error" title="无法加载商户详情" subTitle={auditMerchantDetail.error.message} />
+          <Result
+            status="error"
+            title="无法加载商户详情"
+            subTitle={auditMerchantDetail.error.message}
+          />
         ) : auditMerchantDetail.data ? (
           <MerchantAuditDetail profile={auditMerchantDetail.data.profile as MerchantLifecycle} />
         ) : null}
@@ -816,6 +899,34 @@ function OperationsPage({ activeKey }: { activeKey: string }) {
               children: (
                 <FraudTable
                   rows={fraud.data?.items ?? []}
+                  pagination={fraud.data?.pagination}
+                  severity={fraudSeverity}
+                  status={fraudStatus}
+                  alertType={fraudType}
+                  merchantId={fraudMerchantId}
+                  creatorId={fraudCreatorId}
+                  onSeverityChange={(value) => {
+                    setFraudSeverity(value)
+                    setFraudPage(1)
+                  }}
+                  onStatusChange={(value) => {
+                    setFraudStatus(value)
+                    setFraudPage(1)
+                  }}
+                  onAlertTypeChange={(value) => {
+                    setFraudType(value)
+                    setFraudPage(1)
+                  }}
+                  onMerchantIdChange={(value) => {
+                    setFraudMerchantId(value)
+                    setFraudPage(1)
+                  }}
+                  onCreatorIdChange={(value) => {
+                    setFraudCreatorId(value)
+                    setFraudPage(1)
+                  }}
+                  onPageChange={setFraudPage}
+                  loading={fraud.isFetching}
                   onResolve={(id, action) =>
                     action === 'review'
                       ? run(() => resolveFraudAlert(id, action))
@@ -832,9 +943,19 @@ function OperationsPage({ activeKey }: { activeKey: string }) {
         />
       ) : null}
       {!error && key === 'finance' ? (
-        <FinanceTable
-          rows={finance.data?.items ?? []}
+        <FinanceReconciliationDashboard
+          overview={financeOverview.data}
+          revenueRows={finance.data?.items ?? []}
           pendingAmount={finance.data?.summary.pendingAmount ?? 0}
+          merchantId={financeMerchantId}
+          creatorId={financeCreatorId}
+          onMerchantIdChange={(value) => {
+            setFinanceMerchantId(value)
+            setFinanceCreatorId('')
+          }}
+          onCreatorIdChange={setFinanceCreatorId}
+          onRefresh={refresh}
+          loading={finance.isFetching || financeOverview.isFetching}
           onSettle={(id) => run(() => settleReconciliation(id))}
         />
       ) : null}
@@ -852,6 +973,44 @@ function OperationsPage({ activeKey }: { activeKey: string }) {
       {!error && key === 'content' ? (
         <ContentTable
           rows={contents.data?.items ?? []}
+          pagination={contents.data?.pagination}
+          status={contentStatus}
+          contentType={contentType}
+          platform={contentPlatform}
+          merchantId={contentMerchantId}
+          creatorId={contentCreatorId}
+          campaignId={contentCampaignId}
+          taskId={contentTaskId}
+          onStatusChange={(value) => {
+            setContentStatus(value)
+            setContentPage(1)
+          }}
+          onContentTypeChange={(value) => {
+            setContentType(value)
+            setContentPage(1)
+          }}
+          onPlatformChange={(value) => {
+            setContentPlatform(value)
+            setContentPage(1)
+          }}
+          onMerchantIdChange={(value) => {
+            setContentMerchantId(value)
+            setContentPage(1)
+          }}
+          onCreatorIdChange={(value) => {
+            setContentCreatorId(value)
+            setContentPage(1)
+          }}
+          onCampaignIdChange={(value) => {
+            setContentCampaignId(value)
+            setContentPage(1)
+          }}
+          onTaskIdChange={(value) => {
+            setContentTaskId(value)
+            setContentPage(1)
+          }}
+          onPageChange={setContentPage}
+          loading={contents.isFetching}
           onModerate={(id, decision) =>
             decision === 'passed'
               ? run(() => moderateContent(id, decision))
@@ -913,7 +1072,22 @@ function OperationsPage({ activeKey }: { activeKey: string }) {
         <PilotEvidenceDashboard data={pilot.data} />
       ) : null}
       {!error && key === 'audit' ? (
-        <OperationAuditTable rows={auditLogs.data?.items ?? []} />
+        <OperationAuditTable
+          rows={auditLogs.data?.items ?? []}
+          pagination={auditLogs.data?.pagination}
+          targetType={auditTargetType}
+          targetId={auditTargetId}
+          onTargetTypeChange={(value) => {
+            setAuditTargetType(value)
+            setAuditPage(1)
+          }}
+          onTargetIdChange={(value) => {
+            setAuditTargetId(value)
+            setAuditPage(1)
+          }}
+          onPageChange={setAuditPage}
+          loading={auditLogs.isFetching}
+        />
       ) : null}
     </>
   )
@@ -1487,8 +1661,12 @@ function RecoveryReceivablesDashboard() {
       key: 'progress',
       render: (_, row) => (
         <Space direction="vertical" size={0}>
-          <span>{formatCurrency(row.recoveredAmount, 2)} / {formatCurrency(row.recoveryAmount, 2)}</span>
-          <Typography.Text strong type="danger">待追回 {formatCurrency(row.remainingAmount, 2)}</Typography.Text>
+          <span>
+            {formatCurrency(row.recoveredAmount, 2)} / {formatCurrency(row.recoveryAmount, 2)}
+          </span>
+          <Typography.Text strong type="danger">
+            待追回 {formatCurrency(row.remainingAmount, 2)}
+          </Typography.Text>
         </Space>
       ),
     },
@@ -1521,7 +1699,11 @@ function RecoveryReceivablesDashboard() {
       title: '操作',
       key: 'action',
       fixed: 'right',
-      render: (_, row) => <Button type="link" onClick={() => setSelected(row)}>查看裁决与流水</Button>,
+      render: (_, row) => (
+        <Button type="link" onClick={() => setSelected(row)}>
+          查看裁决与流水
+        </Button>
+      ),
     },
   ]
   const refresh = () => {
@@ -1532,7 +1714,11 @@ function RecoveryReceivablesDashboard() {
     <>
       <Alert
         showIcon
-        type={reconciliationData?.receivableMatches && reconciliationData.settlementOffsets.matches ? 'success' : 'warning'}
+        type={
+          reconciliationData?.receivableMatches && reconciliationData.settlementOffsets.matches
+            ? 'success'
+            : 'warning'
+        }
         className="operation-summary"
         message={
           reconciliationData
@@ -1540,7 +1726,8 @@ function RecoveryReceivablesDashboard() {
             : '正在读取待追回款每日对账结果'
         }
         description={
-          reconciliationData && (!reconciliationData.receivableMatches || !reconciliationData.settlementOffsets.matches)
+          reconciliationData &&
+          (!reconciliationData.receivableMatches || !reconciliationData.settlementOffsets.matches)
             ? `余额差额 ${formatCurrency(reconciliationData.receivableDifference, 2)}；抵扣不一致结算 ${reconciliationData.settlementOffsets.mismatches.length} 笔。`
             : undefined
         }
@@ -1549,7 +1736,10 @@ function RecoveryReceivablesDashboard() {
         <Space wrap>
           <Select
             value={riskLevel}
-            onChange={(value) => { setRiskLevel(value); setPage(1) }}
+            onChange={(value) => {
+              setRiskLevel(value)
+              setPage(1)
+            }}
             aria-label="待追回风险等级"
             options={[
               { value: 'all', label: '全部待追回款' },
@@ -1558,7 +1748,11 @@ function RecoveryReceivablesDashboard() {
               { value: 'critical', label: '60 天重点处置' },
             ]}
           />
-          <Button icon={<ReloadOutlined spin={recovery.isFetching || reconciliation.isFetching} />} onClick={refresh} loading={recovery.isFetching || reconciliation.isFetching}>
+          <Button
+            icon={<ReloadOutlined spin={recovery.isFetching || reconciliation.isFetching} />}
+            onClick={refresh}
+            loading={recovery.isFetching || reconciliation.isFetching}
+          >
             刷新对账与队列
           </Button>
         </Space>
@@ -1571,10 +1765,31 @@ function RecoveryReceivablesDashboard() {
         description={data?.policy.automatedAction}
       />
       <Row gutter={[12, 12]} className="section-block">
-        <Col xs={12} sm={6}><Statistic title="待追回余额" value={data?.summary.outstandingAmount ?? 0} precision={2} prefix="¥" /></Col>
-        <Col xs={12} sm={6}><Statistic title="7 天待跟进" value={data?.summary.watch ?? 0} /></Col>
-        <Col xs={12} sm={6}><Statistic title="30 天超期" value={data?.summary.overdue ?? 0} valueStyle={{ color: '#d46b08' }} /></Col>
-        <Col xs={12} sm={6}><Statistic title="60 天重点处置" value={data?.summary.critical ?? 0} valueStyle={{ color: '#cf1322' }} /></Col>
+        <Col xs={12} sm={6}>
+          <Statistic
+            title="待追回余额"
+            value={data?.summary.outstandingAmount ?? 0}
+            precision={2}
+            prefix="¥"
+          />
+        </Col>
+        <Col xs={12} sm={6}>
+          <Statistic title="7 天待跟进" value={data?.summary.watch ?? 0} />
+        </Col>
+        <Col xs={12} sm={6}>
+          <Statistic
+            title="30 天超期"
+            value={data?.summary.overdue ?? 0}
+            valueStyle={{ color: '#d46b08' }}
+          />
+        </Col>
+        <Col xs={12} sm={6}>
+          <Statistic
+            title="60 天重点处置"
+            value={data?.summary.critical ?? 0}
+            valueStyle={{ color: '#cf1322' }}
+          />
+        </Col>
       </Row>
       <Card>
         <Table
@@ -1604,13 +1819,27 @@ function RecoveryReceivablesDashboard() {
           <>
             <Descriptions bordered size="small" column={2}>
               <Descriptions.Item label="裁决 ID">{selected.appealId}</Descriptions.Item>
-              <Descriptions.Item label="裁决时间">{selected.resolvedAt ? formatDate(selected.resolvedAt) : '—'}</Descriptions.Item>
-              <Descriptions.Item label="应追回">{formatCurrency(selected.recoveryAmount, 2)}</Descriptions.Item>
-              <Descriptions.Item label="已追回">{formatCurrency(selected.recoveredAmount, 2)}</Descriptions.Item>
-              <Descriptions.Item label="剩余待追回">{formatCurrency(selected.remainingAmount, 2)}</Descriptions.Item>
-              <Descriptions.Item label="最后一次抵扣">{selected.lastOffsetAt ? formatDate(selected.lastOffsetAt) : '尚无'}</Descriptions.Item>
-              <Descriptions.Item label="超期天数">{selected.daysWithoutOffset} 天</Descriptions.Item>
-              <Descriptions.Item label="运营建议">{selected.risk.recommendedAction}</Descriptions.Item>
+              <Descriptions.Item label="裁决时间">
+                {selected.resolvedAt ? formatDate(selected.resolvedAt) : '—'}
+              </Descriptions.Item>
+              <Descriptions.Item label="应追回">
+                {formatCurrency(selected.recoveryAmount, 2)}
+              </Descriptions.Item>
+              <Descriptions.Item label="已追回">
+                {formatCurrency(selected.recoveredAmount, 2)}
+              </Descriptions.Item>
+              <Descriptions.Item label="剩余待追回">
+                {formatCurrency(selected.remainingAmount, 2)}
+              </Descriptions.Item>
+              <Descriptions.Item label="最后一次抵扣">
+                {selected.lastOffsetAt ? formatDate(selected.lastOffsetAt) : '尚无'}
+              </Descriptions.Item>
+              <Descriptions.Item label="超期天数">
+                {selected.daysWithoutOffset} 天
+              </Descriptions.Item>
+              <Descriptions.Item label="运营建议">
+                {selected.risk.recommendedAction}
+              </Descriptions.Item>
             </Descriptions>
             <Table
               style={{ marginTop: 16 }}
@@ -1620,8 +1849,16 @@ function RecoveryReceivablesDashboard() {
               dataSource={selected.offsets}
               columns={[
                 { title: '抵扣流水', dataIndex: 'ledgerEntryId' },
-                { title: '抵扣金额', dataIndex: 'amount', render: (value) => formatCurrency(value, 2) },
-                { title: '对应后续结算', dataIndex: 'settlementPayoutId', render: (value) => value || '—' },
+                {
+                  title: '抵扣金额',
+                  dataIndex: 'amount',
+                  render: (value) => formatCurrency(value, 2),
+                },
+                {
+                  title: '对应后续结算',
+                  dataIndex: 'settlementPayoutId',
+                  render: (value) => value || '—',
+                },
                 { title: '抵扣时间', dataIndex: 'occurredAt', render: formatDate },
               ]}
               locale={{ emptyText: '尚无后续结算抵扣流水' }}
@@ -1748,15 +1985,33 @@ function CreatorTaskQueue({
 }) {
   const [campaignId, setCampaignId] = useState('')
   const [merchantId, setMerchantId] = useState('')
+  const [creatorId, setCreatorId] = useState('')
+  const [creatorTaskId, setCreatorTaskId] = useState('')
+  const [growthTaskId, setGrowthTaskId] = useState('')
+  const [status, setStatus] = useState('')
   const [page, setPage] = useState(1)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [reasonModal, contextHolder] = Modal.useModal()
   const queue = useQuery({
-    queryKey: ['creator-task-queue', mode, campaignId, merchantId, page],
+    queryKey: [
+      'creator-task-queue',
+      mode,
+      campaignId,
+      merchantId,
+      creatorId,
+      creatorTaskId,
+      growthTaskId,
+      status,
+      page,
+    ],
     queryFn: () =>
       (mode === 'review' ? getCreatorTaskReviewQueue : getCreatorTaskRiskQueue)({
+        creatorTaskId: creatorTaskId || undefined,
         campaignId: campaignId || undefined,
         merchantId: merchantId || undefined,
+        creatorId: creatorId || undefined,
+        growthTaskId: growthTaskId || undefined,
+        status: status || undefined,
         page,
         pageSize: 20,
       }),
@@ -1814,6 +2069,23 @@ function CreatorTaskQueue({
         >
           {value}
         </Tag>
+      ),
+    },
+    {
+      title: '关联范围',
+      key: 'scope',
+      render: (_, row) => (
+        <Space direction="vertical" size={0}>
+          <Typography.Text>
+            达人 <IdText value={row.creatorId} />
+          </Typography.Text>
+          <Typography.Text type="secondary">
+            商户 <IdText value={row.merchantId} />
+          </Typography.Text>
+          <Typography.Text type="secondary">
+            Campaign <IdText value={row.campaignId} />
+          </Typography.Text>
+        </Space>
       ),
     },
     {
@@ -1917,6 +2189,57 @@ function CreatorTaskQueue({
             placeholder="商户 ID"
             className="scope-input"
           />
+          <Input
+            allowClear
+            value={creatorId}
+            onChange={(event) => {
+              setCreatorId(event.target.value)
+              setPage(1)
+            }}
+            placeholder="达人 ID"
+            className="scope-input"
+          />
+          <Input
+            allowClear
+            value={creatorTaskId}
+            onChange={(event) => {
+              setCreatorTaskId(event.target.value)
+              setPage(1)
+            }}
+            placeholder="Creator Task ID"
+            className="scope-input"
+          />
+          <Input
+            allowClear
+            value={growthTaskId}
+            onChange={(event) => {
+              setGrowthTaskId(event.target.value)
+              setPage(1)
+            }}
+            placeholder="Growth Task ID"
+            className="scope-input"
+          />
+          <Select
+            allowClear
+            value={status || undefined}
+            onChange={(value) => {
+              setStatus(value ?? '')
+              setPage(1)
+            }}
+            placeholder={mode === 'review' ? '全部审核状态' : '全部风控状态'}
+            options={
+              mode === 'review'
+                ? [
+                    { value: 'submitted', label: '待审核' },
+                    { value: 'approved', label: '已通过' },
+                    { value: 'rejected', label: '已驳回' },
+                  ]
+                : [
+                    { value: 'risk_hold', label: '风控暂停' },
+                    { value: 'violation', label: '已判违规' },
+                  ]
+            }
+          />
           <Button onClick={() => void queue.refetch()} loading={queue.isFetching}>
             筛选
           </Button>
@@ -1931,7 +2254,7 @@ function CreatorTaskQueue({
             columns={columns}
             dataSource={queue.data?.items ?? []}
             loading={queue.isLoading}
-            scroll={{ x: 980 }}
+            scroll={{ x: 1200 }}
             pagination={{
               current: queue.data?.pagination.page ?? page,
               pageSize: queue.data?.pagination.pageSize ?? 20,
@@ -1993,6 +2316,14 @@ function TaskWorkbenchDetail({ data }: { data: CreatorTaskWorkbench }) {
         className="operation-summary"
         message={`补偿${data.economics.compensation.lockedAt ? '已于 ' + formatDate(data.economics.compensation.lockedAt) + ' 锁定' : '尚未锁定'}；Credits 已消耗 ${data.economics.campaignCredits.consumed}/${data.economics.campaignCredits.allocated}`}
       />
+      <Descriptions bordered size="small" column={2} className="section-block">
+        <Descriptions.Item label="Creator Task ID">{data.task.id}</Descriptions.Item>
+        <Descriptions.Item label="达人 ID">{data.task.creatorId}</Descriptions.Item>
+        <Descriptions.Item label="商户 ID">{data.task.merchantId}</Descriptions.Item>
+        <Descriptions.Item label="Campaign ID">{data.task.campaignId || '—'}</Descriptions.Item>
+        <Descriptions.Item label="Growth Task ID">{data.task.growthTaskId}</Descriptions.Item>
+        <Descriptions.Item label="任务状态">{data.task.status}</Descriptions.Item>
+      </Descriptions>
       <Typography.Title level={5}>内容证据与 Creator Studio 操作</Typography.Title>
       <Table
         size="small"
@@ -2105,7 +2436,12 @@ function AuditTable<T extends object>({
 }
 
 function MerchantAuditDetail({ profile }: { profile: MerchantLifecycle }) {
-  const address = [profile.address?.province, profile.address?.city, profile.address?.district, profile.address?.detail]
+  const address = [
+    profile.address?.province,
+    profile.address?.city,
+    profile.address?.district,
+    profile.address?.detail,
+  ]
     .filter(Boolean)
     .join('')
   return (
@@ -2115,13 +2451,25 @@ function MerchantAuditDetail({ profile }: { profile: MerchantLifecycle }) {
         <Descriptions.Item label="商户类型">{profile.businessType || '—'}</Descriptions.Item>
         <Descriptions.Item label="行业分类">{profile.industryCategory || '—'}</Descriptions.Item>
         <Descriptions.Item label="营业执照号">{profile.businessLicenseNo || '—'}</Descriptions.Item>
-        <Descriptions.Item label="联系人">{profile.administratorContact.name || '—'}</Descriptions.Item>
-        <Descriptions.Item label="联系电话">{profile.administratorContact.phone || '—'}</Descriptions.Item>
-        <Descriptions.Item label="联系邮箱" span={2}>{profile.administratorContact.email || '—'}</Descriptions.Item>
-        <Descriptions.Item label="商户地址" span={2}>{address || '—'}</Descriptions.Item>
-        <Descriptions.Item label="申请时间" span={2}>{formatDate(profile.createdAt)}</Descriptions.Item>
+        <Descriptions.Item label="联系人">
+          {profile.administratorContact.name || '—'}
+        </Descriptions.Item>
+        <Descriptions.Item label="联系电话">
+          {profile.administratorContact.phone || '—'}
+        </Descriptions.Item>
+        <Descriptions.Item label="联系邮箱" span={2}>
+          {profile.administratorContact.email || '—'}
+        </Descriptions.Item>
+        <Descriptions.Item label="商户地址" span={2}>
+          {address || '—'}
+        </Descriptions.Item>
+        <Descriptions.Item label="申请时间" span={2}>
+          {formatDate(profile.createdAt)}
+        </Descriptions.Item>
       </Descriptions>
-      <Typography.Title level={5} style={{ marginBottom: 0 }}>申请门店</Typography.Title>
+      <Typography.Title level={5} style={{ marginBottom: 0 }}>
+        申请门店
+      </Typography.Title>
       <Table
         size="small"
         rowKey="id"
@@ -2134,9 +2482,15 @@ function MerchantAuditDetail({ profile }: { profile: MerchantLifecycle }) {
             title: '地址',
             key: 'address',
             render: (_, store) =>
-              [store.province, store.city, store.district, store.addressDetail].filter(Boolean).join('') || '—',
+              [store.province, store.city, store.district, store.addressDetail]
+                .filter(Boolean)
+                .join('') || '—',
           },
-          { title: '状态', dataIndex: 'status', render: (value) => (value === 'active' ? '正常' : '停用') },
+          {
+            title: '状态',
+            dataIndex: 'status',
+            render: (value) => (value === 'active' ? '正常' : '停用'),
+          },
         ]}
       />
     </Space>
@@ -2145,9 +2499,35 @@ function MerchantAuditDetail({ profile }: { profile: MerchantLifecycle }) {
 
 function FraudTable({
   rows,
+  pagination,
+  severity,
+  status,
+  alertType,
+  merchantId,
+  creatorId,
+  onSeverityChange,
+  onStatusChange,
+  onAlertTypeChange,
+  onMerchantIdChange,
+  onCreatorIdChange,
+  onPageChange,
+  loading,
   onResolve,
 }: {
   rows: FraudAlert[]
+  pagination?: { page: number; pageSize: number; total: number; totalPages: number }
+  severity: string
+  status: string
+  alertType: string
+  merchantId: string
+  creatorId: string
+  onSeverityChange: (value: string) => void
+  onStatusChange: (value: string) => void
+  onAlertTypeChange: (value: string) => void
+  onMerchantIdChange: (value: string) => void
+  onCreatorIdChange: (value: string) => void
+  onPageChange: (value: number) => void
+  loading: boolean
   onResolve: (id: string, action: 'dismiss' | 'review' | 'freeze_commission') => void
 }) {
   const columns: ColumnsType<FraudAlert> = [
@@ -2165,6 +2545,20 @@ function FraudTable({
       title: '置信度',
       dataIndex: 'confidence',
       render: (value) => `${Math.round(Number(value) * 100)}%`,
+    },
+    {
+      title: '关联范围',
+      key: 'scope',
+      render: (_, row) => (
+        <Space direction="vertical" size={0}>
+          <Typography.Text>
+            达人 <IdText value={row.agentId} />
+          </Typography.Text>
+          <Typography.Text type="secondary">
+            商户 <IdText value={row.merchantId} />
+          </Typography.Text>
+        </Space>
+      ),
     },
     { title: '发生时间', dataIndex: 'createdAt', render: formatDate },
     {
@@ -2191,15 +2585,440 @@ function FraudTable({
     },
   ]
   return (
-    <Card>
-      <Table
-        rowKey="alertId"
-        columns={columns}
-        dataSource={rows}
-        locale={{ emptyText: '当前没有待处理告警' }}
-        scroll={{ x: 760 }}
-      />
-    </Card>
+    <>
+      <Card className="filter-card" size="small">
+        <Space wrap>
+          <Select
+            allowClear
+            value={severity || undefined}
+            onChange={(value) => onSeverityChange(value ?? '')}
+            placeholder="全部风险级别"
+            options={[
+              { value: 'critical', label: '严重' },
+              { value: 'warning', label: '警告' },
+              { value: 'notice', label: '注意' },
+            ]}
+          />
+          <Select
+            value={status || undefined}
+            onChange={onStatusChange}
+            placeholder="告警状态"
+            options={[
+              { value: 'pending', label: '待处理' },
+              { value: 'reviewed', label: '已阅' },
+              { value: 'actioned', label: '已采取措施' },
+              { value: 'dismissed', label: '已标记误报' },
+              { value: 'all', label: '全部状态' },
+            ]}
+          />
+          <Select
+            allowClear
+            value={alertType || undefined}
+            onChange={(value) => onAlertTypeChange(value ?? '')}
+            placeholder="全部风险类型"
+            options={[
+              { value: 'high_frequency_redemption', label: '高频核销' },
+              { value: 'suspicious_self_redemption', label: '疑似自核销' },
+              { value: 'merchant_abnormal_rate', label: '商户异常率' },
+              { value: 'commission_anomaly', label: '佣金异常' },
+              { value: 'content_violation', label: '内容违规' },
+              { value: 'ip_clustering', label: 'IP 聚集' },
+              { value: 'device_fingerprint', label: '设备指纹' },
+            ]}
+          />
+          <Input
+            allowClear
+            value={merchantId}
+            onChange={(event) => onMerchantIdChange(event.target.value)}
+            placeholder="商户 ID"
+            className="scope-input"
+          />
+          <Input
+            allowClear
+            value={creatorId}
+            onChange={(event) => onCreatorIdChange(event.target.value)}
+            placeholder="达人 ID"
+            className="scope-input"
+          />
+        </Space>
+      </Card>
+      <Card>
+        <Table
+          rowKey="alertId"
+          columns={columns}
+          dataSource={rows}
+          loading={loading}
+          locale={{ emptyText: '当前没有待处理告警' }}
+          scroll={{ x: 980 }}
+          pagination={{
+            current: pagination?.page,
+            pageSize: pagination?.pageSize ?? 20,
+            total: pagination?.total ?? 0,
+            showSizeChanger: false,
+            onChange: onPageChange,
+          }}
+        />
+      </Card>
+    </>
+  )
+}
+
+function FinanceReconciliationDashboard({
+  overview,
+  revenueRows,
+  pendingAmount,
+  merchantId,
+  creatorId,
+  onMerchantIdChange,
+  onCreatorIdChange,
+  onRefresh,
+  loading,
+  onSettle,
+}: {
+  overview?: FinanceReconciliationOverview
+  revenueRows: Reconciliation[]
+  pendingAmount: number
+  merchantId: string
+  creatorId: string
+  onMerchantIdChange: (value: string) => void
+  onCreatorIdChange: (value: string) => void
+  onRefresh: () => void
+  loading: boolean
+  onSettle: (id: string) => void
+}) {
+  const internal = overview?.internal
+  const merchantSummary = overview?.merchant.summary
+  const creatorSummary = overview?.creator.summary
+  const merchantColumns: ColumnsType<FinanceMerchantReconciliation> = [
+    {
+      title: '商户',
+      key: 'merchant',
+      render: (_, row) => (
+        <Space direction="vertical" size={0}>
+          <Typography.Text strong>{row.merchantName}</Typography.Text>
+          <Typography.Text type="secondary">{shortId(row.merchantId)}</Typography.Text>
+        </Space>
+      ),
+    },
+    { title: '活动数', dataIndex: 'campaignCount' },
+    {
+      title: '已承诺预算',
+      dataIndex: 'committedBudget',
+      render: (value: number) => formatCurrency(value, 2),
+    },
+    {
+      title: '已消耗预算',
+      dataIndex: 'spentBudget',
+      render: (value: number) => formatCurrency(value, 2),
+    },
+    {
+      title: '预算余款',
+      dataIndex: 'budgetRemaining',
+      render: (value: number) => formatCurrency(value, 2),
+    },
+    {
+      title: '平台收入流水',
+      key: 'platformRevenue',
+      render: (_, row) => (
+        <Space direction="vertical" size={0}>
+          <span>{formatCurrency(row.platformRevenue, 2)}</span>
+          <Typography.Text type="secondary">
+            待确认 {formatCurrency(row.platformRevenuePending, 2)}
+          </Typography.Text>
+        </Space>
+      ),
+    },
+    {
+      title: '对账状态',
+      dataIndex: 'status',
+      render: (value: FinanceMerchantReconciliation['status']) => formatFinanceStatus(value),
+    },
+  ]
+  const creatorColumns: ColumnsType<FinanceCreatorReconciliation> = [
+    {
+      title: '达人',
+      key: 'creator',
+      render: (_, row) => (
+        <Space direction="vertical" size={0}>
+          <Typography.Text strong>{row.creatorName}</Typography.Text>
+          <Typography.Text type="secondary">{shortId(row.creatorId)}</Typography.Text>
+        </Space>
+      ),
+    },
+    {
+      title: '任务',
+      key: 'tasks',
+      render: (_, row) => (
+        <Space direction="vertical" size={0}>
+          <span>{row.taskCount} 个</span>
+          <Typography.Text type="secondary">待审核 {row.pendingReviewCount}</Typography.Text>
+        </Space>
+      ),
+    },
+    {
+      title: '应付报酬',
+      dataIndex: 'expectedPayout',
+      render: (value: number) => formatCurrency(value, 2),
+    },
+    {
+      title: '已核验',
+      dataIndex: 'verifiedPayout',
+      render: (value: number) => formatCurrency(value, 2),
+    },
+    {
+      title: '已结算',
+      dataIndex: 'settledPayout',
+      render: (value: number) => formatCurrency(value, 2),
+    },
+    {
+      title: '冻结 / 待结算',
+      key: 'outstanding',
+      render: (_, row) => (
+        <Space direction="vertical" size={0}>
+          <span>{formatCurrency(row.outstandingPayout, 2)}</span>
+          <Typography.Text type={row.heldPayout > 0 ? 'danger' : 'secondary'}>
+            风控冻结 {formatCurrency(row.heldPayout, 2)}
+          </Typography.Text>
+        </Space>
+      ),
+    },
+    {
+      title: '对账状态',
+      dataIndex: 'status',
+      render: (value: FinanceCreatorReconciliation['status']) => formatFinanceStatus(value),
+    },
+  ]
+
+  return (
+    <>
+      <Card className="filter-card" size="small">
+        <Space wrap>
+          <Input
+            allowClear
+            value={merchantId}
+            onChange={(event) => onMerchantIdChange(event.target.value)}
+            placeholder="商户 ID（可选）"
+            aria-label="财务对账商户 ID"
+            className="scope-input"
+          />
+          <Input
+            allowClear
+            value={creatorId}
+            onChange={(event) => onCreatorIdChange(event.target.value)}
+            placeholder="达人 ID（可选）"
+            aria-label="财务对账达人 ID"
+            className="scope-input"
+          />
+          <Button icon={<ReloadOutlined spin={loading} />} onClick={onRefresh} loading={loading}>
+            刷新对账
+          </Button>
+        </Space>
+      </Card>
+      {!overview ? (
+        <Card>
+          <Skeleton active paragraph={{ rows: 10 }} />
+        </Card>
+      ) : (
+        <>
+          <Alert
+            showIcon
+            type="info"
+            className="operation-summary"
+            message="对账口径"
+            description={
+              <Space direction="vertical" size={4}>
+                <span>内部总账：{overview.definition.internal}</span>
+                <span>商户：{overview.definition.merchant}</span>
+                <span>达人：{overview.definition.creator}</span>
+                <span>追回款：{overview.definition.recovery}</span>
+              </Space>
+            }
+          />
+          <Tabs
+            items={[
+              {
+                key: 'overview',
+                label: '对账总览',
+                children: (
+                  <>
+                    <Row gutter={[16, 16]} className="section-block">
+                      <Col xs={12} sm={8} xl={4}>
+                        <Statistic
+                          title="平台收入流水"
+                          value={internal?.platformRevenue ?? 0}
+                          prefix="¥"
+                          precision={2}
+                        />
+                      </Col>
+                      <Col xs={12} sm={8} xl={4}>
+                        <Statistic
+                          title="已确认对账"
+                          value={internal?.platformRevenueSettled ?? 0}
+                          prefix="¥"
+                          precision={2}
+                        />
+                      </Col>
+                      <Col xs={12} sm={8} xl={4}>
+                        <Statistic
+                          title="待确认收入"
+                          value={internal?.platformRevenuePending ?? pendingAmount}
+                          prefix="¥"
+                          precision={2}
+                          valueStyle={{ color: '#b7791f' }}
+                        />
+                      </Col>
+                      <Col xs={12} sm={8} xl={4}>
+                        <Statistic
+                          title="Creator Payout COGS"
+                          value={internal?.creatorPayoutCogs ?? 0}
+                          prefix="¥"
+                          precision={2}
+                        />
+                      </Col>
+                      <Col xs={12} sm={8} xl={4}>
+                        <Statistic
+                          title="达人待结算 / 冻结"
+                          value={creatorSummary?.outstandingPayout ?? 0}
+                          prefix="¥"
+                          precision={2}
+                          valueStyle={{ color: creatorSummary?.heldPayout ? '#c53030' : undefined }}
+                        />
+                      </Col>
+                      <Col xs={12} sm={8} xl={4}>
+                        <Statistic
+                          title="内部账本净结果"
+                          value={internal?.ledgerNetResult ?? 0}
+                          prefix="¥"
+                          precision={2}
+                          valueStyle={{
+                            color: (internal?.ledgerNetResult ?? 0) >= 0 ? '#276749' : '#c53030',
+                          }}
+                        />
+                      </Col>
+                    </Row>
+                    <Row gutter={[16, 16]} className="section-block">
+                      <Col xs={24} xl={12}>
+                        <Card size="small" title="商户侧：预算执行对账">
+                          <Descriptions size="small" column={2}>
+                            <Descriptions.Item label="商户数">
+                              {merchantSummary?.merchants ?? 0}
+                            </Descriptions.Item>
+                            <Descriptions.Item label="活动数">
+                              {merchantSummary?.campaignCount ?? 0}
+                            </Descriptions.Item>
+                            <Descriptions.Item label="已承诺预算">
+                              {formatCurrency(merchantSummary?.committedBudget ?? 0, 2)}
+                            </Descriptions.Item>
+                            <Descriptions.Item label="已消耗预算">
+                              {formatCurrency(merchantSummary?.spentBudget ?? 0, 2)}
+                            </Descriptions.Item>
+                            <Descriptions.Item label="预算余款" span={2}>
+                              {formatCurrency(merchantSummary?.budgetRemaining ?? 0, 2)}
+                            </Descriptions.Item>
+                          </Descriptions>
+                          <Typography.Text type="secondary">
+                            此处核对商户活动资金执行情况，不代表商户付款单。
+                          </Typography.Text>
+                        </Card>
+                      </Col>
+                      <Col xs={24} xl={12}>
+                        <Card size="small" title="达人侧：报酬结算对账">
+                          <Descriptions size="small" column={2}>
+                            <Descriptions.Item label="达人数">
+                              {creatorSummary?.creators ?? 0}
+                            </Descriptions.Item>
+                            <Descriptions.Item label="任务数">
+                              {creatorSummary?.taskCount ?? 0}
+                            </Descriptions.Item>
+                            <Descriptions.Item label="应付报酬">
+                              {formatCurrency(creatorSummary?.expectedPayout ?? 0, 2)}
+                            </Descriptions.Item>
+                            <Descriptions.Item label="已核验">
+                              {formatCurrency(creatorSummary?.verifiedPayout ?? 0, 2)}
+                            </Descriptions.Item>
+                            <Descriptions.Item label="已结算">
+                              {formatCurrency(creatorSummary?.settledPayout ?? 0, 2)}
+                            </Descriptions.Item>
+                            <Descriptions.Item label="风控冻结">
+                              {formatCurrency(creatorSummary?.heldPayout ?? 0, 2)}
+                            </Descriptions.Item>
+                          </Descriptions>
+                          <Typography.Text type="secondary">
+                            待结算或风控冻结属于待处理状态，不直接判定为金额差异。
+                          </Typography.Text>
+                        </Card>
+                      </Col>
+                      <Col xs={24}>
+                        <Card size="small" title="追回款：裁决与钱包余额">
+                          <Space wrap>
+                            <Typography.Text>
+                              裁决待追回{' '}
+                              {formatCurrency(overview.recovery.adjudicationReceivable, 2)}
+                            </Typography.Text>
+                            <Typography.Text>
+                              钱包待追回 {formatCurrency(overview.recovery.walletReceivable, 2)}
+                            </Typography.Text>
+                            <Typography.Text
+                              type={overview.recovery.status === 'balanced' ? 'success' : 'danger'}
+                            >
+                              差额 {formatCurrency(overview.recovery.difference, 2)}
+                            </Typography.Text>
+                            {formatFinanceStatus(overview.recovery.status)}
+                          </Space>
+                        </Card>
+                      </Col>
+                    </Row>
+                  </>
+                ),
+              },
+              {
+                key: 'merchant',
+                label: `商户预算对账（${merchantSummary?.merchants ?? 0}）`,
+                children: (
+                  <Card>
+                    <Table
+                      rowKey="merchantId"
+                      columns={merchantColumns}
+                      dataSource={overview.merchant.items}
+                      pagination={false}
+                      scroll={{ x: 1050 }}
+                      locale={{ emptyText: '没有可对账的商户预算数据' }}
+                    />
+                  </Card>
+                ),
+              },
+              {
+                key: 'creator',
+                label: `达人结算对账（${creatorSummary?.creators ?? 0}）`,
+                children: (
+                  <Card>
+                    <Table
+                      rowKey="creatorId"
+                      columns={creatorColumns}
+                      dataSource={overview.creator.items}
+                      pagination={false}
+                      scroll={{ x: 1160 }}
+                      locale={{ emptyText: '没有可对账的达人结算数据' }}
+                    />
+                  </Card>
+                ),
+              },
+              {
+                key: 'platform-revenue',
+                label: `平台收入流水（待确认 ${formatCurrency(pendingAmount, 2)}）`,
+                children: (
+                  <FinanceTable
+                    rows={revenueRows}
+                    pendingAmount={pendingAmount}
+                    onSettle={onSettle}
+                  />
+                ),
+              },
+            ]}
+          />
+        </>
+      )}
+    </>
   )
 }
 
@@ -2250,14 +3069,74 @@ function FinanceTable({
 
 function ContentTable({
   rows,
+  pagination,
+  status,
+  contentType,
+  platform,
+  merchantId,
+  creatorId,
+  campaignId,
+  taskId,
+  onStatusChange,
+  onContentTypeChange,
+  onPlatformChange,
+  onMerchantIdChange,
+  onCreatorIdChange,
+  onCampaignIdChange,
+  onTaskIdChange,
+  onPageChange,
+  loading,
   onModerate,
 }: {
   rows: ModerationContent[]
+  pagination?: { page: number; pageSize: number; total: number; totalPages: number }
+  status: string
+  contentType: string
+  platform: string
+  merchantId: string
+  creatorId: string
+  campaignId: string
+  taskId: string
+  onStatusChange: (value: string) => void
+  onContentTypeChange: (value: string) => void
+  onPlatformChange: (value: string) => void
+  onMerchantIdChange: (value: string) => void
+  onCreatorIdChange: (value: string) => void
+  onCampaignIdChange: (value: string) => void
+  onTaskIdChange: (value: string) => void
+  onPageChange: (value: number) => void
+  loading: boolean
   onModerate: (id: string, decision: 'passed' | 'flagged' | 'blocked') => void
 }) {
   const columns: ColumnsType<ModerationContent> = [
     { title: '类型', dataIndex: 'type' },
     { title: '平台', dataIndex: 'platform', render: (v) => v ?? '—' },
+    {
+      title: '审核状态',
+      dataIndex: 'moderationStatus',
+      render: (value: string) => (
+        <Tag color={value === 'pending' ? 'processing' : value === 'passed' ? 'success' : 'error'}>
+          {value}
+        </Tag>
+      ),
+    },
+    {
+      title: '关联范围',
+      key: 'scope',
+      render: (_, row) => (
+        <Space direction="vertical" size={0}>
+          <Typography.Text>
+            达人 <IdText value={row.creatorId} />
+          </Typography.Text>
+          <Typography.Text type="secondary">
+            商户 <IdText value={row.merchantId} />
+          </Typography.Text>
+          <Typography.Text type="secondary">
+            任务 <IdText value={row.creatorTaskId} />
+          </Typography.Text>
+        </Space>
+      ),
+    },
     {
       title: '内容预览',
       dataIndex: 'content',
@@ -2292,19 +3171,116 @@ function ContentTable({
     },
   ]
   return (
-    <Card>
-      <Table
-        rowKey="id"
-        columns={columns}
-        dataSource={rows}
-        locale={{ emptyText: '没有待审核内容' }}
-        scroll={{ x: 850 }}
-      />
-    </Card>
+    <>
+      <Card className="filter-card" size="small">
+        <Space wrap>
+          <Select
+            value={status}
+            onChange={onStatusChange}
+            placeholder="审核状态"
+            options={[
+              { value: 'pending', label: '待审核' },
+              { value: 'passed', label: '已通过' },
+              { value: 'flagged', label: '已标记' },
+              { value: 'blocked', label: '已拦截' },
+              { value: 'all', label: '全部状态' },
+            ]}
+          />
+          <Select
+            allowClear
+            value={contentType || undefined}
+            onChange={(value) => onContentTypeChange(value ?? '')}
+            placeholder="全部内容类型"
+            options={[
+              { value: 'creator_studio', label: 'Creator Studio' },
+              { value: 'copywriting', label: '文案' },
+              { value: 'video', label: '视频' },
+              { value: 'poster', label: '海报' },
+            ]}
+          />
+          <Select
+            allowClear
+            value={platform || undefined}
+            onChange={(value) => onPlatformChange(value ?? '')}
+            placeholder="全部发布平台"
+            options={[
+              { value: 'wechat', label: '微信' },
+              { value: 'douyin', label: '抖音' },
+              { value: 'xiaohongshu', label: '小红书' },
+              { value: 'video_account', label: '视频号' },
+              { value: 'kuaishou', label: '快手' },
+            ]}
+          />
+          <Input
+            allowClear
+            value={merchantId}
+            onChange={(event) => onMerchantIdChange(event.target.value)}
+            placeholder="商户 ID"
+            className="scope-input"
+          />
+          <Input
+            allowClear
+            value={creatorId}
+            onChange={(event) => onCreatorIdChange(event.target.value)}
+            placeholder="达人 ID"
+            className="scope-input"
+          />
+          <Input
+            allowClear
+            value={campaignId}
+            onChange={(event) => onCampaignIdChange(event.target.value)}
+            placeholder="Campaign ID"
+            className="scope-input"
+          />
+          <Input
+            allowClear
+            value={taskId}
+            onChange={(event) => onTaskIdChange(event.target.value)}
+            placeholder="Creator Task ID"
+            className="scope-input"
+          />
+        </Space>
+      </Card>
+      <Card>
+        <Table
+          rowKey="id"
+          columns={columns}
+          dataSource={rows}
+          loading={loading}
+          locale={{ emptyText: status === 'pending' ? '没有待审核内容' : '没有符合条件的内容' }}
+          scroll={{ x: 1250 }}
+          pagination={{
+            current: pagination?.page,
+            pageSize: pagination?.pageSize ?? 20,
+            total: pagination?.total ?? 0,
+            showSizeChanger: false,
+            onChange: onPageChange,
+          }}
+        />
+      </Card>
+    </>
   )
 }
 
-function OperationAuditTable({ rows }: { rows: OperationAuditLog[] }) {
+function OperationAuditTable({
+  rows,
+  pagination,
+  targetType,
+  targetId,
+  onTargetTypeChange,
+  onTargetIdChange,
+  onPageChange,
+  loading,
+}: {
+  rows: OperationAuditLog[]
+  pagination?: { page: number; pageSize: number; total: number; totalPages: number }
+  targetType: string
+  targetId: string
+  onTargetTypeChange: (value: string) => void
+  onTargetIdChange: (value: string) => void
+  onPageChange: (value: number) => void
+  loading: boolean
+}) {
   const columns: ColumnsType<OperationAuditLog> = [
     { title: '处理时间', dataIndex: 'createdAt', render: formatDate },
     { title: '处理人', key: 'actor', render: (_, row) => row.actorName || row.actorId || '系统' },
@@ -2331,21 +3307,55 @@ function OperationAuditTable({ rows }: { rows: OperationAuditLog[] }) {
     },
   ]
   return (
-    <Card>
-      <Alert
-        showIcon
-        type="info"
-        message="审核、风控和内容处理均会写入不可变审计记录，并同步向业务主体发送站内通知。"
-        className="operation-summary"
-      />
-      <Table
-        rowKey="id"
-        columns={columns}
-        dataSource={rows}
-        locale={{ emptyText: '暂无人工处理记录' }}
-        scroll={{ x: 900 }}
-      />
-    </Card>
+    <>
+      <Card className="filter-card" size="small">
+        <Space wrap>
+          <Select
+            allowClear
+            value={targetType || undefined}
+            onChange={(value) => onTargetTypeChange(value ?? '')}
+            placeholder="全部对象类型"
+            options={[
+              { value: 'merchant', label: '商户' },
+              { value: 'creator', label: '达人' },
+              { value: 'creator_task', label: 'Creator Task' },
+              { value: 'content', label: '内容' },
+              { value: 'relationship', label: '合作关系' },
+            ]}
+          />
+          <Input
+            allowClear
+            value={targetId}
+            onChange={(event) => onTargetIdChange(event.target.value)}
+            placeholder="对象 ID"
+            className="scope-input"
+          />
+        </Space>
+      </Card>
+      <Card>
+        <Alert
+          showIcon
+          type="info"
+          message="审核、风控和内容处理均会写入不可变审计记录，并同步向业务主体发送站内通知。"
+          className="operation-summary"
+        />
+        <Table
+          rowKey="id"
+          columns={columns}
+          dataSource={rows}
+          loading={loading}
+          locale={{ emptyText: '暂无人工处理记录' }}
+          scroll={{ x: 900 }}
+          pagination={{
+            current: pagination?.page,
+            pageSize: pagination?.pageSize ?? 20,
+            total: pagination?.total ?? 0,
+            showSizeChanger: false,
+            onChange: onPageChange,
+          }}
+        />
+      </Card>
+    </>
   )
 }
 
@@ -2389,6 +3399,25 @@ function formatFinancialClassification(value: string) {
     }[value] ?? value
   )
 }
+function formatFinanceStatus(
+  value: 'balanced' | 'pending' | 'exception' | 'risk_hold' | 'attention',
+) {
+  const labels = {
+    balanced: '已平衡',
+    pending: '待处理',
+    exception: '有差异',
+    risk_hold: '风控冻结',
+    attention: '需人工核查',
+  }
+  const colors = {
+    balanced: 'success',
+    pending: 'warning',
+    exception: 'error',
+    risk_hold: 'error',
+    attention: 'error',
+  }
+  return <Tag color={colors[value]}>{labels[value]}</Tag>
+}
 function formatAppealTarget(value: CreatorTaskAppeal['target']) {
   return value === 'payout' ? '报酬争议' : '任务争议'
 }
@@ -2416,6 +3445,15 @@ function formatAdjudicationDecision(value: NonNullable<CreatorTaskAppeal['adjudi
 }
 function shortId(value: string | null) {
   return value ? `${value.slice(0, 8)}...` : '—'
+}
+function IdText({ value }: { value: string | null }) {
+  return value ? (
+    <Typography.Text code copyable={{ text: value }}>
+      {shortId(value)}
+    </Typography.Text>
+  ) : (
+    '—'
+  )
 }
 function emptyText(value: string | null) {
   return value || '—'

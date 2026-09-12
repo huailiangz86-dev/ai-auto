@@ -24,7 +24,9 @@
     "migration:revert": "typeorm-ts-node-commonjs migration:revert -d src/data-source.ts",
     "admin:create": "ts-node --transpile-only scripts/create-admin.ts",
     "acceptance:financial": "ts-node --transpile-only scripts/local-financial-acceptance.ts",
-    "seed:staging-demo": "ts-node --transpile-only scripts/seed-staging-demo.ts"
+    "seed:staging-demo": "ts-node --transpile-only scripts/seed-staging-demo.ts",
+    "admin:seed-agent-mocks": "node scripts/seed-sharing-agent-mocks.js",
+    "admin:seed-creator-task-review-mocks": "node scripts/seed-creator-task-review-mocks.js"
   },
   "dependencies": {
     "@ai-auto/shared": "workspace:*",

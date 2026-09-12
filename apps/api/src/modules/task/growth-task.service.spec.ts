@@ -2,6 +2,7 @@ import { BadRequestException } from '@nestjs/common'
 import { DataSource } from 'typeorm'
 
 import { AgentWallet } from '../agent/entities/agent-wallet.entity'
+import { FinancialLedgerEntry } from '../admin/entities/financial-ledger-entry.entity'
 import { CreatorTaskPayout } from './entities/creator-task-payout.entity'
 import { CreatorTask } from './entities/growth-task.entity'
 import { GrowthTaskService } from './growth-task.service'
@@ -28,6 +29,8 @@ describe('GrowthTaskService risk hold payout coordination', () => {
       id: 'payout-1',
       creatorTaskId: 'task-1',
       creatorId: 'creator-1',
+      merchantId: 'merchant-1',
+      campaignId: 'campaign-1',
       status: 'verified',
       verifiedAmount: 100,
       riskHoldPreviousStatus: null,
@@ -46,6 +49,7 @@ describe('GrowthTaskService risk hold payout coordination', () => {
         if (entity === AgentWallet) return Promise.resolve(wallet)
         return Promise.resolve(null)
       }),
+      find: jest.fn().mockResolvedValue([]),
       save: jest.fn((entityOrValue: unknown, maybeValue?: unknown) =>
         Promise.resolve(maybeValue ?? entityOrValue),
       ),
@@ -114,7 +118,87 @@ describe('GrowthTaskService risk hold payout coordination', () => {
     expect(payout.riskHoldReason).toBe('确认刷量')
     expect(wallet.pendingSettlementBalance).toBe(0)
     expect(wallet.totalEarned).toBe(0)
+    expect(wallet.settledBalance).toBe(0)
+    expect(manager.save).toHaveBeenCalledWith(
+      FinancialLedgerEntry,
+      expect.objectContaining({
+        classification: 'cogs',
+        entryType: 'creator_task_payout',
+        amount: 100,
+        idempotencyKey: 'creator-task-payout:payout-1:verified',
+        metadata: expect.objectContaining({ reconstructedAtReversal: true }),
+      }),
+    )
+    expect(manager.save).toHaveBeenCalledWith(
+      FinancialLedgerEntry,
+      expect.objectContaining({
+        classification: 'cogs',
+        entryType: 'creator_payout_reversal',
+        amount: -100,
+        merchantId: 'merchant-1',
+        campaignId: 'campaign-1',
+        creatorId: 'creator-1',
+        creatorTaskId: 'task-1',
+        sourceReference: 'payout-1',
+        idempotencyKey: 'creator-task-payout:payout-1:reversal',
+        recordedByAdminId: 'admin-1',
+        metadata: expect.objectContaining({
+          reversedAmount: 100,
+          reversesEntryIdempotencyKey: 'creator-task-payout:payout-1:verified',
+          reason: '确认刷量',
+        }),
+      }),
+    )
   })
+
+  it('does not duplicate an existing verified payout ledger entry during reversal', async () => {
+    task.status = 'risk_hold'
+    task.riskHoldPreviousStatus = 'completed'
+    payout.status = 'risk_hold'
+    payout.riskHoldPreviousStatus = 'verified'
+    manager.findOne.mockImplementation((entity: unknown) => {
+      if (entity === CreatorTask) return Promise.resolve(task)
+      if (entity === CreatorTaskPayout) return Promise.resolve(payout)
+      if (entity === AgentWallet) return Promise.resolve(wallet)
+      if (entity === FinancialLedgerEntry) return Promise.resolve({ id: 'ledger-verified' })
+      return Promise.resolve(null)
+    })
+
+    await service.resolveRiskHold('task-1', 'admin-1', 'violation', '确认刷量')
+
+    expect(manager.save).not.toHaveBeenCalledWith(
+      FinancialLedgerEntry,
+      expect.objectContaining({ entryType: 'creator_task_payout' }),
+    )
+    expect(manager.save).toHaveBeenCalledWith(
+      FinancialLedgerEntry,
+      expect.objectContaining({ entryType: 'creator_payout_reversal', amount: -100 }),
+    )
+  })
+
+  it.each([
+    ['pendingSettlementBalance', 99, 100],
+    ['totalEarned', 100, 99],
+  ])(
+    'refuses reversal when wallet %s cannot cover the verified payout',
+    async (_, pending, earned) => {
+      task.status = 'risk_hold'
+      task.riskHoldPreviousStatus = 'completed'
+      payout.status = 'risk_hold'
+      payout.riskHoldPreviousStatus = 'verified'
+      wallet.pendingSettlementBalance = pending
+      wallet.totalEarned = earned
+
+      await expect(
+        service.resolveRiskHold('task-1', 'admin-1', 'violation', '确认刷量'),
+      ).rejects.toBeInstanceOf(BadRequestException)
+
+      expect(wallet.pendingSettlementBalance).toBe(pending)
+      expect(wallet.totalEarned).toBe(earned)
+      expect(payout.status).toBe('risk_hold')
+      expect(manager.save).not.toHaveBeenCalledWith(FinancialLedgerEntry, expect.anything())
+    },
+  )
 
   it('does not put an already settled payout on risk hold', async () => {
     payout.status = 'settled'
@@ -124,5 +208,39 @@ describe('GrowthTaskService risk hold payout coordination', () => {
     )
     expect(task.status).toBe('completed')
     expect(manager.save).not.toHaveBeenCalled()
+  })
+
+  it('records a creator declining an invitation with a reason', async () => {
+    task.status = 'invited'
+    task.deadline = new Date('2026-09-10T08:00:00Z')
+
+    const result = await service.declineCreatorTask('creator-1', 'task-1', '档期冲突')
+
+    expect(result).toMatchObject({
+      status: 'cancelled',
+      stateReason: '档期冲突',
+      stateChangedBy: 'creator-1',
+    })
+    expect(manager.save).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'cancelled', stateReason: '档期冲突' }),
+    )
+  })
+
+  it('expires overdue invitations and records a system transition', async () => {
+    task.status = 'invited'
+    task.deadline = new Date('2026-09-01T08:00:00Z')
+    manager.find.mockResolvedValueOnce([task])
+
+    const result = await service.expireOverdueCreatorTasks('creator-1')
+
+    expect(result.expiredCount).toBe(1)
+    expect(task).toMatchObject({
+      status: 'expired',
+      stateReason: '邀约已超过截止时间',
+      stateChangedBy: null,
+    })
+    expect(manager.save).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'expired', stateReason: '邀约已超过截止时间' }),
+    )
   })
 })

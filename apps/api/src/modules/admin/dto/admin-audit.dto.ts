@@ -10,6 +10,7 @@ import {
   IsNumber,
   IsArray,
   IsIn,
+  IsUUID,
   MaxLength,
   Min,
   Max,
@@ -87,6 +88,80 @@ export class ListPendingAgentsDto {
   @IsOptional()
   @IsString()
   keyword?: string
+
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  page?: number = 1
+
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  @Max(100)
+  pageSize?: number = 20
+}
+
+export class ListFraudAlertsDto {
+  @IsOptional()
+  @IsString()
+  severity?: string
+
+  @IsOptional()
+  @IsString()
+  status?: string
+
+  @IsOptional()
+  @IsString()
+  alertType?: string
+
+  @IsOptional()
+  @IsUUID()
+  merchantId?: string
+
+  @IsOptional()
+  @IsUUID()
+  agentId?: string
+
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  page?: number = 1
+
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  @Max(100)
+  pageSize?: number = 20
+}
+
+export class ListContentModerationDto {
+  @IsOptional()
+  @IsIn(['all', 'pending', 'passed', 'flagged', 'blocked'])
+  status?: string = 'pending'
+
+  @IsOptional()
+  @IsString()
+  contentType?: string
+
+  @IsOptional()
+  @IsString()
+  targetPlatform?: string
+
+  @IsOptional()
+  @IsUUID()
+  merchantId?: string
+
+  @IsOptional()
+  @IsUUID()
+  creatorId?: string
+
+  @IsOptional()
+  @IsUUID()
+  campaignId?: string
+
+  @IsOptional()
+  @IsUUID()
+  creatorTaskId?: string
 
   @IsOptional()
   @IsNumber()

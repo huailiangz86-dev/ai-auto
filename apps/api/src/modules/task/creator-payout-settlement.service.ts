@@ -7,6 +7,7 @@ import { FinancialLedgerEntry } from '../admin/entities/financial-ledger-entry.e
 import { AgentWallet } from '../agent/entities/agent-wallet.entity'
 import { Notification } from '../notification/entities/notification.entity'
 import { CreatorTaskAppeal, CreatorTaskPayout } from './entities/creator-task-payout.entity'
+import { CreatorTask } from './entities/growth-task.entity'
 
 @Injectable()
 export class CreatorPayoutSettlementService {
@@ -74,6 +75,16 @@ export class CreatorPayoutSettlementService {
         payout.recoveryOffsetAmount = recoveryOffset
         await manager.save(wallet)
         await manager.save(payout)
+        const task = await manager.findOne(CreatorTask, {
+          where: { id: payout.creatorTaskId },
+          lock: { mode: 'pessimistic_write' },
+        })
+        if (task?.status === 'completed') {
+          task.status = 'settled'
+          task.stateChangedBy = null
+          task.stateChangedAt = payout.settledAt
+          await manager.save(task)
+        }
         processed++
         totalAmount = this.money(totalAmount + payableAmount)
       }
@@ -100,7 +111,9 @@ export class CreatorPayoutSettlementService {
     let offsetTotal = 0
     for (const appeal of recoveries) {
       if (remainingPayout <= 0) break
-      const due = this.money(Number(appeal.recoveryAmount ?? 0) - Number(appeal.recoveryRecoveredAmount ?? 0))
+      const due = this.money(
+        Number(appeal.recoveryAmount ?? 0) - Number(appeal.recoveryRecoveredAmount ?? 0),
+      )
       if (due <= 0) continue
       const applied = this.money(Math.min(remainingPayout, due, recoveryReceivable - offsetTotal))
       if (applied <= 0) continue
@@ -132,7 +145,9 @@ export class CreatorPayoutSettlementService {
             recoveryAmount: Number(appeal.recoveryAmount ?? 0),
             recoveredBefore,
             recoveredAfter,
-            remainingRecoveryAmount: this.money(Number(appeal.recoveryAmount ?? 0) - recoveredAfter),
+            remainingRecoveryAmount: this.money(
+              Number(appeal.recoveryAmount ?? 0) - recoveredAfter,
+            ),
           },
         }),
       )
@@ -148,7 +163,13 @@ export class CreatorPayoutSettlementService {
         body: `本次结算已抵扣 ¥${applied.toFixed(2)}；该裁决尚待追回 ¥${Math.max(0, Number(appeal.recoveryAmount) - recoveredAfter).toFixed(2)}。`,
         targetType: 'creator_task_appeal',
         targetId: appeal.id,
-        metadata: { appealId: appeal.id, settlementPayoutId: payout.id, applied, recoveredAfter, completed },
+        metadata: {
+          appealId: appeal.id,
+          settlementPayoutId: payout.id,
+          applied,
+          recoveredAfter,
+          completed,
+        },
       })
       await manager.save(Notification, {
         recipientId: appeal.merchantId,
@@ -158,7 +179,13 @@ export class CreatorPayoutSettlementService {
         body: `后续结算已追回 ¥${applied.toFixed(2)}；该裁决累计已追回 ¥${recoveredAfter.toFixed(2)}。`,
         targetType: 'creator_task_appeal',
         targetId: appeal.id,
-        metadata: { appealId: appeal.id, settlementPayoutId: payout.id, applied, recoveredAfter, completed },
+        metadata: {
+          appealId: appeal.id,
+          settlementPayoutId: payout.id,
+          applied,
+          recoveredAfter,
+          completed,
+        },
       })
       remainingPayout = this.money(remainingPayout - applied)
       offsetTotal = this.money(offsetTotal + applied)

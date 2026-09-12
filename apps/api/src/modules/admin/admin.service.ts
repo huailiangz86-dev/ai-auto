@@ -17,6 +17,7 @@ import { Redemption } from '../commission/entities/redemption.entity'
 import { Commission } from '../commission/entities/commission.entity'
 import { PlatformRevenue } from '../merchant/entities/platform-revenue.entity'
 import { Content } from '../content/entities/content.entity'
+import { CreatorTask } from '../task/entities/growth-task.entity'
 import { MerchantAgentBinding } from '../merchant/entities/merchant-agent-binding.entity'
 import { Notification } from '../notification/entities/notification.entity'
 import { AuditStatus, AuditActionType, SubscriptionStatus, UserRole } from '@ai-auto/shared'
@@ -33,12 +34,15 @@ import { DashboardQueryDto } from './dto/dashboard.dto'
 import { BlacklistCreatorDto, SetCreatorGrowthScoreDto } from './dto/admin-audit.dto'
 import { calculateCreatorGrowthScore } from '../agent/creator-growth-score'
 
-type DashboardScope = {
+interface DashboardScope {
   merchantId?: string
   agentId?: string
 }
 
-type AdminActor = { id: string; name?: string | null }
+interface AdminActor {
+  id: string
+  name?: string | null
+}
 const SYSTEM_ACTOR: AdminActor = { id: '00000000-0000-0000-0000-000000000000', name: '系统' }
 
 @Injectable()
@@ -428,11 +432,7 @@ export class AdminService {
       qb.andWhere(`${commissionAlias}.agent_id = :agentId`, { agentId: scope.agentId })
   }
 
-  private fillTrend(
-    start: Date,
-    days: number,
-    rows: Array<{ date: string; value: string | number }>,
-  ) {
+  private fillTrend(start: Date, days: number, rows: { date: string; value: string | number }[]) {
     const values = new Map(rows.map((row) => [row.date, Number(row.value)]))
     return Array.from({ length: days }, (_, index) => {
       const date = this.addDays(start, index)
@@ -882,31 +882,75 @@ export class AdminService {
   /**
    * 风控告警列表
    */
-  async listFraudAlerts(severity?: string, page = 1, pageSize = 20) {
+  async listFraudAlerts(
+    severity?: string,
+    page = 1,
+    pageSize = 20,
+    filters: {
+      status?: string
+      alertType?: string
+      merchantId?: string
+      agentId?: string
+    } = {},
+  ) {
     const normalizedPage = Math.max(Number(page) || 1, 1)
     const normalizedPageSize = Math.min(Math.max(Number(pageSize) || 20, 1), 100)
-    const where: any = {}
-    if (severity) {
-      where.severity = severity
+    const hasAdvancedFilters = Boolean(
+      filters.status || filters.alertType || filters.merchantId || filters.agentId,
+    )
+    let alerts: FraudAlert[]
+    let total: number
+    if (!hasAdvancedFilters) {
+      const where: Record<string, string> = {}
+      if (severity) where.severity = severity
+      ;[alerts, total] = await this.fraudAlertRepo.findAndCount({
+        where,
+        order: { createdAt: 'DESC' },
+        skip: (normalizedPage - 1) * normalizedPageSize,
+        take: normalizedPageSize,
+      })
+    } else {
+      const qb = this.fraudAlertRepo.createQueryBuilder('alert')
+      if (severity) qb.andWhere('alert.severity = :severity', { severity })
+      if (filters.status && filters.status !== 'all') {
+        qb.andWhere('alert.status = :alertStatus', { alertStatus: filters.status })
+      }
+      if (filters.alertType)
+        qb.andWhere('alert.alert_type = :alertType', { alertType: filters.alertType })
+      if (filters.merchantId)
+        qb.andWhere('alert.merchant_id = :merchantId', { merchantId: filters.merchantId })
+      if (filters.agentId) qb.andWhere('alert.agent_id = :agentId', { agentId: filters.agentId })
+      ;[alerts, total] = await qb
+        .orderBy('alert.createdAt', 'DESC')
+        .skip((normalizedPage - 1) * normalizedPageSize)
+        .take(normalizedPageSize)
+        .getManyAndCount()
     }
 
-    const [alerts, total] = await this.fraudAlertRepo.findAndCount({
-      where,
-      order: { createdAt: 'DESC' },
-      skip: (normalizedPage - 1) * normalizedPageSize,
-      take: normalizedPageSize,
+    const summaryWhere = (level: string) => ({
+      severity: level,
+      ...(filters.status && filters.status !== 'all'
+        ? { status: filters.status }
+        : { status: 'pending' }),
+      ...(filters.alertType ? { alertType: filters.alertType } : {}),
+      ...(filters.merchantId ? { merchantId: filters.merchantId } : {}),
+      ...(filters.agentId ? { agentId: filters.agentId } : {}),
     })
 
     return {
       summary: {
-        critical: await this.fraudAlertRepo.count({
-          where: { severity: 'critical', status: 'pending' },
-        }),
-        warning: await this.fraudAlertRepo.count({
-          where: { severity: 'warning', status: 'pending' },
-        }),
-        notice: await this.fraudAlertRepo.count({
-          where: { severity: 'notice', status: 'pending' },
+        critical: await this.fraudAlertRepo.count({ where: summaryWhere('critical') }),
+        warning: await this.fraudAlertRepo.count({ where: summaryWhere('warning') }),
+        notice: await this.fraudAlertRepo.count({ where: summaryWhere('notice') }),
+        total: await this.fraudAlertRepo.count({
+          where: {
+            ...(filters.status && filters.status !== 'all'
+              ? { status: filters.status }
+              : { status: 'pending' }),
+            ...(filters.alertType ? { alertType: filters.alertType } : {}),
+            ...(filters.merchantId ? { merchantId: filters.merchantId } : {}),
+            ...(filters.agentId ? { agentId: filters.agentId } : {}),
+          },
         }),
       },
       items: alerts.map((a) => ({
@@ -915,6 +959,9 @@ export class AdminService {
         severity: a.severity,
         confidence: a.confidenceScore,
         status: a.status,
+        agentId: a.agentId ?? null,
+        merchantId: a.merchantId ?? null,
+        redemptionId: a.redemptionId ?? null,
         evidence: a.evidence,
         createdAt: a.createdAt,
       })),
@@ -1045,25 +1092,367 @@ export class AdminService {
     return { code: 0, message: '已确认对账' }
   }
 
-  async listContentModeration(status = 'pending', page = 1, pageSize = 20) {
-    const normalizedPage = Math.max(Number(page) || 1, 1)
-    const normalizedPageSize = Math.min(Math.max(Number(pageSize) || 20, 1), 100)
-    const where = status === 'all' ? {} : { moderationStatus: status }
-    const [items, total] = await this.contentRepo.findAndCount({
-      where,
-      order: { createdAt: 'ASC' },
-      skip: (normalizedPage - 1) * normalizedPageSize,
-      take: normalizedPageSize,
+  /**
+   * Returns the four reconciliation views used by the operations console.
+   *
+   * The values intentionally keep their business sources separate:
+   * - internal: the append-only financial ledger and legacy platform revenue;
+   * - merchant: committed campaign budget versus consumed budget;
+   * - creator: task payout lifecycle (estimated/verified/settled/held);
+   * - recovery: adjudicated receivables versus wallet receivables.
+   * This prevents a budget remainder or a pending payout from being presented
+   * as an unexplained accounting discrepancy.
+   */
+  async getFinanceReconciliationOverview(query: { merchantId?: string; creatorId?: string } = {}) {
+    const merchantId = query.merchantId ?? null
+    const creatorId = query.creatorId ?? null
+    const [internalRows, platformRevenueRows, merchantRows, creatorRows, recoveryRows] =
+      await Promise.all([
+        this.dataSource.query(
+          `SELECT
+           COALESCE(SUM(amount) FILTER (WHERE classification = 'revenue'), 0) AS ledger_revenue,
+           COALESCE(SUM(amount) FILTER (WHERE classification = 'cogs'), 0) AS creator_payout_cogs,
+           COALESCE(SUM(amount) FILTER (WHERE classification = 'operating_cost'), 0) AS operating_cost,
+           COALESCE(SUM(amount) FILTER (WHERE classification = 'reserve'), 0) AS risk_reserve,
+           COUNT(*)::int AS ledger_entry_count
+         FROM financial_ledger_entries
+         WHERE ($1::uuid IS NULL OR merchant_id = $1)`,
+          [merchantId],
+        ),
+        this.dataSource.query(
+          `SELECT
+           COALESCE(SUM(amount), 0) AS platform_revenue,
+           COALESCE(SUM(amount) FILTER (WHERE settled = true), 0) AS platform_revenue_settled,
+           COALESCE(SUM(amount) FILTER (WHERE settled = false), 0) AS platform_revenue_pending,
+           COUNT(*) FILTER (WHERE settled = false)::int AS platform_revenue_pending_count
+         FROM platform_revenues
+         WHERE ($1::uuid IS NULL OR merchant_id = $1)`,
+          [merchantId],
+        ),
+        this.dataSource.query(
+          `WITH budget AS (
+           SELECT merchant_id,
+             COALESCE(SUM(planned_amount), 0) AS planned_budget,
+             COALESCE(SUM(committed_amount), 0) AS committed_budget,
+             COALESCE(SUM(spent_amount), 0) AS spent_budget
+           FROM campaign_budget_allocations
+           WHERE ($1::uuid IS NULL OR merchant_id = $1)
+           GROUP BY merchant_id
+         ), campaign_counts AS (
+           SELECT merchant_id, COUNT(*)::int AS campaign_count
+           FROM campaigns
+           WHERE ($1::uuid IS NULL OR merchant_id = $1)
+           GROUP BY merchant_id
+         ), revenue AS (
+           SELECT merchant_id,
+             COALESCE(SUM(amount), 0) AS platform_revenue,
+             COALESCE(SUM(amount) FILTER (WHERE settled = true), 0) AS platform_revenue_settled,
+             COALESCE(SUM(amount) FILTER (WHERE settled = false), 0) AS platform_revenue_pending
+           FROM platform_revenues
+           WHERE ($1::uuid IS NULL OR merchant_id = $1)
+           GROUP BY merchant_id
+         )
+         SELECT m.id AS merchant_id, m.business_name AS merchant_name,
+           COALESCE(c.campaign_count, 0)::int AS campaign_count,
+           COALESCE(b.planned_budget, 0) AS planned_budget,
+           COALESCE(b.committed_budget, 0) AS committed_budget,
+           COALESCE(b.spent_budget, 0) AS spent_budget,
+           COALESCE(r.platform_revenue, 0) AS platform_revenue,
+           COALESCE(r.platform_revenue_settled, 0) AS platform_revenue_settled,
+           COALESCE(r.platform_revenue_pending, 0) AS platform_revenue_pending
+         FROM merchants m
+         LEFT JOIN budget b ON b.merchant_id = m.id
+         LEFT JOIN campaign_counts c ON c.merchant_id = m.id
+         LEFT JOIN revenue r ON r.merchant_id = m.id
+         WHERE ($1::uuid IS NULL OR m.id = $1)
+           AND (b.merchant_id IS NOT NULL OR r.merchant_id IS NOT NULL)
+         ORDER BY m.business_name ASC`,
+          [merchantId],
+        ),
+        this.dataSource.query(
+          `WITH tasks AS (
+           SELECT creator_id,
+             COUNT(*)::int AS task_count,
+             COUNT(*) FILTER (WHERE status IN ('submitted', 'risk_hold'))::int AS pending_review_count
+           FROM creator_tasks
+           WHERE ($1::uuid IS NULL OR merchant_id = $1)
+             AND ($2::uuid IS NULL OR creator_id = $2)
+           GROUP BY creator_id
+         ), payouts AS (
+           SELECT creator_id,
+             COUNT(*)::int AS payout_count,
+             COALESCE(SUM(expected_amount), 0) AS expected_payout,
+             COALESCE(SUM(CASE WHEN status IN ('verified', 'settled', 'risk_hold', 'reversed') THEN COALESCE(verified_amount, expected_amount) ELSE 0 END), 0) AS verified_payout,
+             COALESCE(SUM(CASE WHEN status = 'settled' THEN COALESCE(verified_amount, expected_amount) ELSE 0 END), 0) AS settled_payout,
+             COALESCE(SUM(CASE WHEN status = 'risk_hold' THEN COALESCE(verified_amount, expected_amount) ELSE 0 END), 0) AS held_payout,
+             COALESCE(SUM(CASE WHEN status IN ('estimated', 'verified', 'risk_hold') THEN COALESCE(verified_amount, expected_amount) ELSE 0 END), 0) AS outstanding_payout
+           FROM creator_task_payouts
+           WHERE ($1::uuid IS NULL OR merchant_id = $1)
+             AND ($2::uuid IS NULL OR creator_id = $2)
+           GROUP BY creator_id
+         )
+         SELECT a.id AS creator_id, COALESCE(a.nickname, '未命名创作者') AS creator_name,
+           COALESCE(t.task_count, 0)::int AS task_count,
+           COALESCE(t.pending_review_count, 0)::int AS pending_review_count,
+           COALESCE(p.payout_count, 0)::int AS payout_count,
+           COALESCE(p.expected_payout, 0) AS expected_payout,
+           COALESCE(p.verified_payout, 0) AS verified_payout,
+           COALESCE(p.settled_payout, 0) AS settled_payout,
+           COALESCE(p.held_payout, 0) AS held_payout,
+           COALESCE(p.outstanding_payout, 0) AS outstanding_payout
+         FROM sharing_agents a
+         LEFT JOIN tasks t ON t.creator_id = a.id
+         LEFT JOIN payouts p ON p.creator_id = a.id
+         WHERE ($2::uuid IS NULL OR a.id = $2)
+           AND (t.creator_id IS NOT NULL OR p.creator_id IS NOT NULL)
+         ORDER BY a.nickname ASC NULLS LAST`,
+          [merchantId, creatorId],
+        ),
+        this.dataSource.query(
+          `SELECT
+           (SELECT COALESCE(SUM(GREATEST(recovery_amount - recovery_recovered_amount, 0)), 0)
+              FROM creator_task_appeals
+             WHERE status = 'accepted' AND adjudication_decision = 'reverse_settlement'
+               AND ($1::uuid IS NULL OR merchant_id = $1)
+               AND ($2::uuid IS NULL OR creator_id = $2)) AS adjudication_receivable,
+           (SELECT COALESCE(SUM(recovery_receivable_balance), 0)
+              FROM agent_wallets
+             WHERE ($2::uuid IS NULL OR agent_id = $2)
+               AND ($1::uuid IS NULL OR agent_id IN (
+                 SELECT creator_id FROM creator_task_appeals WHERE merchant_id = $1
+               ))) AS wallet_receivable`,
+          [merchantId, creatorId],
+        ),
+      ])
+
+    const internal = internalRows[0] ?? {}
+    const platformRevenue = platformRevenueRows[0] ?? {}
+    const ledgerRevenue = this.moneyNumber(internal.ledger_revenue)
+    const creatorPayoutCogs = this.moneyNumber(internal.creator_payout_cogs)
+    const operatingCost = this.moneyNumber(internal.operating_cost)
+    const riskReserve = this.moneyNumber(internal.risk_reserve)
+    const ledgerNetResult = this.moneyNumber(
+      ledgerRevenue - creatorPayoutCogs - operatingCost - riskReserve,
+    )
+    const platformRevenueTotal = this.moneyNumber(platformRevenue.platform_revenue)
+    const platformRevenueSettled = this.moneyNumber(platformRevenue.platform_revenue_settled)
+    const platformRevenuePending = this.moneyNumber(platformRevenue.platform_revenue_pending)
+
+    const merchantItems = merchantRows.map((row: Record<string, unknown>) => {
+      const committedBudget = this.moneyNumber(row.committed_budget)
+      const spentBudget = this.moneyNumber(row.spent_budget)
+      const budgetRemaining = this.moneyNumber(committedBudget - spentBudget)
+      const platformPending = this.moneyNumber(row.platform_revenue_pending)
+      return {
+        merchantId: String(row.merchant_id),
+        merchantName: String(row.merchant_name),
+        campaignCount: Number(row.campaign_count ?? 0),
+        plannedBudget: this.moneyNumber(row.planned_budget),
+        committedBudget,
+        spentBudget,
+        budgetRemaining,
+        platformRevenue: this.moneyNumber(row.platform_revenue),
+        platformRevenueSettled: this.moneyNumber(row.platform_revenue_settled),
+        platformRevenuePending: platformPending,
+        status:
+          spentBudget > committedBudget
+            ? 'exception'
+            : platformPending > 0
+              ? 'pending'
+              : 'balanced',
+      }
     })
+
+    const creatorItems = creatorRows.map((row: Record<string, unknown>) => {
+      const heldPayout = this.moneyNumber(row.held_payout)
+      const outstandingPayout = this.moneyNumber(row.outstanding_payout)
+      const pendingReviewCount = Number(row.pending_review_count ?? 0)
+      return {
+        creatorId: String(row.creator_id),
+        creatorName: String(row.creator_name),
+        taskCount: Number(row.task_count ?? 0),
+        pendingReviewCount,
+        payoutCount: Number(row.payout_count ?? 0),
+        expectedPayout: this.moneyNumber(row.expected_payout),
+        verifiedPayout: this.moneyNumber(row.verified_payout),
+        settledPayout: this.moneyNumber(row.settled_payout),
+        heldPayout,
+        outstandingPayout,
+        status:
+          heldPayout > 0
+            ? 'risk_hold'
+            : pendingReviewCount > 0 || outstandingPayout > 0
+              ? 'pending'
+              : 'balanced',
+      }
+    })
+
+    const adjudicationReceivable = this.moneyNumber(recoveryRows[0]?.adjudication_receivable)
+    const walletReceivable = this.moneyNumber(recoveryRows[0]?.wallet_receivable)
+    const recoveryDifference = this.moneyNumber(walletReceivable - adjudicationReceivable)
+    const merchantSummary = merchantItems.reduce(
+      (summary, item) => ({
+        merchants: summary.merchants + 1,
+        campaignCount: summary.campaignCount + item.campaignCount,
+        plannedBudget: this.moneyNumber(summary.plannedBudget + item.plannedBudget),
+        committedBudget: this.moneyNumber(summary.committedBudget + item.committedBudget),
+        spentBudget: this.moneyNumber(summary.spentBudget + item.spentBudget),
+        budgetRemaining: this.moneyNumber(summary.budgetRemaining + item.budgetRemaining),
+        platformRevenue: this.moneyNumber(summary.platformRevenue + item.platformRevenue),
+        platformRevenuePending: this.moneyNumber(
+          summary.platformRevenuePending + item.platformRevenuePending,
+        ),
+      }),
+      {
+        merchants: 0,
+        campaignCount: 0,
+        plannedBudget: 0,
+        committedBudget: 0,
+        spentBudget: 0,
+        budgetRemaining: 0,
+        platformRevenue: 0,
+        platformRevenuePending: 0,
+      },
+    )
+    const creatorSummary = creatorItems.reduce(
+      (summary, item) => ({
+        creators: summary.creators + 1,
+        taskCount: summary.taskCount + item.taskCount,
+        pendingReviewCount: summary.pendingReviewCount + item.pendingReviewCount,
+        expectedPayout: this.moneyNumber(summary.expectedPayout + item.expectedPayout),
+        verifiedPayout: this.moneyNumber(summary.verifiedPayout + item.verifiedPayout),
+        settledPayout: this.moneyNumber(summary.settledPayout + item.settledPayout),
+        heldPayout: this.moneyNumber(summary.heldPayout + item.heldPayout),
+        outstandingPayout: this.moneyNumber(summary.outstandingPayout + item.outstandingPayout),
+      }),
+      {
+        creators: 0,
+        taskCount: 0,
+        pendingReviewCount: 0,
+        expectedPayout: 0,
+        verifiedPayout: 0,
+        settledPayout: 0,
+        heldPayout: 0,
+        outstandingPayout: 0,
+      },
+    )
+
+    return {
+      generatedAt: new Date(),
+      definition: {
+        internal: '财务台账与平台收入流水核对，不代表商户或创作者的对外结算单。',
+        merchant: '商户已承诺预算与活动已消耗预算核对；预算余款不等于异常。',
+        creator: '任务报酬按应付、已核验、已结算、风控冻结拆分。',
+        recovery: '裁决待追回金额与达人钱包待追回余额核对。',
+      },
+      internal: {
+        ledgerRevenue,
+        creatorPayoutCogs,
+        operatingCost,
+        riskReserve,
+        ledgerNetResult,
+        ledgerEntryCount: Number(internal.ledger_entry_count ?? 0),
+        platformRevenue: platformRevenueTotal,
+        platformRevenueSettled,
+        platformRevenuePending,
+        platformRevenuePendingCount: Number(platformRevenue.platform_revenue_pending_count ?? 0),
+      },
+      merchant: { summary: merchantSummary, items: merchantItems },
+      creator: { summary: creatorSummary, items: creatorItems },
+      recovery: {
+        adjudicationReceivable,
+        walletReceivable,
+        difference: recoveryDifference,
+        status: Math.abs(recoveryDifference) <= 0.01 ? 'balanced' : 'attention',
+      },
+    }
+  }
+
+  async listContentModeration(
+    query:
+      | {
+          status?: string
+          contentType?: string
+          targetPlatform?: string
+          merchantId?: string
+          creatorId?: string
+          campaignId?: string
+          creatorTaskId?: string
+          page?: number
+          pageSize?: number
+        }
+      | string = {},
+    legacyPage = 1,
+    legacyPageSize = 20,
+  ) {
+    const normalizedQuery =
+      typeof query === 'string'
+        ? { status: query, page: legacyPage, pageSize: legacyPageSize }
+        : query
+    const normalizedPage = Math.max(Number(normalizedQuery.page) || 1, 1)
+    const normalizedPageSize = Math.min(Math.max(Number(normalizedQuery.pageSize) || 20, 1), 100)
+    const qb = this.contentRepo
+      .createQueryBuilder('content')
+      .leftJoinAndSelect('content.campaign', 'campaign')
+      .leftJoinAndMapOne(
+        'content.creatorTaskScope',
+        CreatorTask,
+        'creatorTaskScope',
+        'creatorTaskScope.id = content.creator_task_id',
+      )
+    if (normalizedQuery.status && normalizedQuery.status !== 'all') {
+      qb.andWhere('content.moderation_status = :moderationStatus', {
+        moderationStatus: normalizedQuery.status,
+      })
+    }
+    if (normalizedQuery.contentType) {
+      qb.andWhere('content.content_type = :contentType', {
+        contentType: normalizedQuery.contentType,
+      })
+    }
+    if (normalizedQuery.targetPlatform) {
+      qb.andWhere('content.target_platform = :targetPlatform', {
+        targetPlatform: normalizedQuery.targetPlatform,
+      })
+    }
+    if (normalizedQuery.creatorId) {
+      qb.andWhere('content.agent_id = :creatorId', { creatorId: normalizedQuery.creatorId })
+    }
+    if (normalizedQuery.campaignId) {
+      qb.andWhere('content.campaign_id = :campaignId', { campaignId: normalizedQuery.campaignId })
+    }
+    if (normalizedQuery.creatorTaskId) {
+      qb.andWhere('content.creator_task_id = :creatorTaskId', {
+        creatorTaskId: normalizedQuery.creatorTaskId,
+      })
+    }
+    if (normalizedQuery.merchantId) {
+      qb.andWhere(
+        '(campaign.merchant_id = :contentMerchantId OR creatorTaskScope.merchant_id = :contentMerchantId)',
+        { contentMerchantId: normalizedQuery.merchantId },
+      )
+    }
+    const [items, total] = await qb
+      .orderBy('content.createdAt', 'ASC')
+      .skip((normalizedPage - 1) * normalizedPageSize)
+      .take(normalizedPageSize)
+      .getManyAndCount()
     return {
       items: items.map((item) => ({
         id: item.id,
         type: item.contentType,
         platform: item.targetPlatform,
         agentId: item.agentId,
-        campaignId: item.campaignId,
+        creatorId: item.agentId,
+        merchantId:
+          item.campaign?.merchantId ??
+          (item as Content & { creatorTaskScope?: CreatorTask }).creatorTaskScope?.merchantId ??
+          null,
+        campaignId: item.campaignId ?? null,
+        creatorTaskId: item.creatorTaskId ?? null,
         status: item.status,
         moderationStatus: item.moderationStatus,
+        moderationMessage: item.moderationMessage ?? null,
         content: item.contentData,
         trackingUrl: item.trackingUrl,
         createdAt: item.createdAt,
@@ -1234,6 +1623,11 @@ export class AdminService {
   }
   // 工具方法
   // ========================
+
+  private moneyNumber(value: unknown): number {
+    const amount = Number(value ?? 0)
+    return Number.isFinite(amount) ? Math.round(amount * 100) / 100 : 0
+  }
 
   private maskPhone(phone: string): string {
     if (!phone || phone.length < 11) return phone
