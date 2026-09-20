@@ -45,11 +45,7 @@ export const searchMerchants = (params: {
 export const getMyCoupons = (params: { status?: string; page?: number; pageSize?: number } = {}) =>
   request<PageResult<CustomerCoupon>>({ url: '/customer/coupons', method: 'GET', params })
 
-export const claimCoupon = (
-  couponId: string,
-  attributionId?: string,
-  trackingConsent = false,
-) =>
+export const claimCoupon = (couponId: string, attributionId?: string, trackingConsent = false) =>
   request<CustomerCoupon>({
     url: '/customer/coupons/claim',
     method: 'POST',
@@ -104,11 +100,15 @@ export const recordCouponShare = (
     data: { platform },
   })
 
-export const recordReferral = (agentId: string, couponId?: string) =>
+export const recordReferral = (data: {
+  agentId?: string
+  couponId?: string
+  trackingId?: string
+}) =>
   request<{ attributionId: string; isNewLock: boolean }>({
-    url: `/customer/shares/referrals/${agentId}`,
+    url: '/customer/shares/referrals',
     method: 'POST',
-    data: { couponId },
+    data,
   })
 
 export const getPromotionPerformance = () =>
@@ -121,7 +121,12 @@ export const generateCustomerCopywriting = (data: {
   tone?: string
   count?: number
   keywords?: string
-}) => request<CopywritingDraft>({ url: '/customer/ai-creation/copywriting/generate', method: 'POST', data })
+}) =>
+  request<CopywritingDraft>({
+    url: '/customer/ai-creation/copywriting/generate',
+    method: 'POST',
+    data,
+  })
 
 export const confirmCustomerCopywriting = (data: {
   draftId: string
@@ -153,10 +158,17 @@ export const generateCustomerPoster = (data: {
   variantCount?: number
 }) => request<PosterResult>({ url: '/customer/ai-creation/poster/generate', method: 'POST', data })
 
-export const getGamificationOverview = () => request<GamificationOverview>({ url: '/customer/gamification/overview', method: 'GET' })
-export const getGamificationRewards = () => request<RewardProduct[]>({ url: '/customer/gamification/rewards', method: 'GET' })
-export const openMysteryBox = () => request<MysteryBoxResult>({ url: '/customer/gamification/mystery-boxes/open', method: 'POST' })
-export const redeemGamificationReward = (rewardProductId: string) => request<{ reward: RewardProduct; remainingPoints: number }>({ url: `/customer/gamification/rewards/${rewardProductId}/redeem`, method: 'POST' })
+export const getGamificationOverview = () =>
+  request<GamificationOverview>({ url: '/customer/gamification/overview', method: 'GET' })
+export const getGamificationRewards = () =>
+  request<RewardProduct[]>({ url: '/customer/gamification/rewards', method: 'GET' })
+export const openMysteryBox = () =>
+  request<MysteryBoxResult>({ url: '/customer/gamification/mystery-boxes/open', method: 'POST' })
+export const redeemGamificationReward = (rewardProductId: string) =>
+  request<{ reward: RewardProduct; remainingPoints: number }>({
+    url: `/customer/gamification/rewards/${rewardProductId}/redeem`,
+    method: 'POST',
+  })
 
 /**
  * 该端点在 API 契约中定义，由微信 code 换取 C 端专用 JWT。

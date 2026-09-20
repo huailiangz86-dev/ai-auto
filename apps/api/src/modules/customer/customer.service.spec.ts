@@ -18,6 +18,7 @@ import { Coupon } from '../campaign/entities/coupon.entity'
 import { Redemption } from '../commission/entities/redemption.entity'
 import { SharingAgent } from '../agent/entities/sharing-agent.entity'
 import { Store } from '../merchant/entities/store.entity'
+import { CreatorTask } from '../task/entities/growth-task.entity'
 import { CouponStatus } from '@ai-auto/shared'
 import { SharingTaskService } from '../task/sharing-task.service'
 
@@ -45,6 +46,7 @@ describe('CustomerService', () => {
   let dataSource: any
   let agentRepo: any
   let storeRepo: any
+  let creatorTaskRepo: any
 
   beforeEach(async () => {
     customerRepo = createMockRepo()
@@ -81,6 +83,7 @@ describe('CustomerService', () => {
         getManyAndCount: jest.fn().mockResolvedValue([[], 0]),
       })),
     }
+    creatorTaskRepo = createMockRepo()
 
     dataSource = {
       createQueryBuilder: jest.fn(() => ({
@@ -103,6 +106,7 @@ describe('CustomerService', () => {
         { provide: getRepositoryToken(Redemption), useValue: redemptionRepo },
         { provide: getRepositoryToken(SharingAgent), useValue: agentRepo },
         { provide: getRepositoryToken(Store), useValue: storeRepo },
+        { provide: getRepositoryToken(CreatorTask), useValue: creatorTaskRepo },
         { provide: DataSource, useValue: dataSource },
         {
           provide: SharingTaskService,
@@ -232,6 +236,75 @@ describe('CustomerService', () => {
       })
 
       expect(result.isNewLock).toBe(true)
+    })
+
+    it('以内容 Tracking ID 建立归因时固化达人任务快照', async () => {
+      customerRepo.findOne.mockResolvedValueOnce({ id: 'customer-123', phone: '13900000000' })
+      creatorTaskRepo.findOne.mockResolvedValueOnce({
+        id: 'creator-task-1',
+        trackingId: 'tracking-1',
+        creatorId: 'agent-123',
+        campaignId: 'campaign-1',
+        status: 'published',
+      })
+      agentRepo.findOne.mockResolvedValueOnce({ id: 'agent-123', phone: '13800000000' })
+      attributionRepo.findOne.mockResolvedValueOnce(null).mockResolvedValueOnce(null)
+      attributionRepo.create.mockImplementationOnce((value: any) => ({
+        id: 'attr-creator',
+        ...value,
+      }))
+      attributionRepo.save.mockImplementationOnce(async (value: any) => value)
+
+      const result = await service.createAttribution({
+        customerId: 'customer-123',
+        trackingId: 'tracking-1',
+        sourceType: 'share_link',
+      })
+
+      expect(result).toEqual({ attributionId: 'attr-creator', isNewLock: true })
+      expect(attributionRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          agentId: 'agent-123',
+          campaignId: 'campaign-1',
+          creatorTaskId: 'creator-task-1',
+          trackingId: 'tracking-1',
+        }),
+      )
+    })
+
+    it.each([
+      [{ status: 'approved' }, undefined, undefined, '内容尚未发布'],
+      [
+        { status: 'published', creatorId: 'agent-123' },
+        'agent-other',
+        undefined,
+        '追踪链接与分享员不一致',
+      ],
+      [
+        { status: 'published', campaignId: 'campaign-1' },
+        undefined,
+        'campaign-other',
+        '追踪链接与活动不一致',
+      ],
+    ])('拒绝无效或不匹配的内容追踪链接', async (taskPatch, agentId, campaignId, message) => {
+      creatorTaskRepo.findOne.mockResolvedValueOnce({
+        id: 'creator-task-1',
+        trackingId: 'tracking-1',
+        creatorId: 'agent-123',
+        campaignId: 'campaign-1',
+        ...taskPatch,
+      })
+
+      await expect(
+        service.createAttribution({
+          customerId: 'customer-123',
+          trackingId: 'tracking-1',
+          agentId,
+          campaignId,
+          sourceType: 'share_link',
+        }),
+      ).rejects.toThrow(message)
+      expect(customerRepo.findOne).not.toHaveBeenCalled()
     })
   })
 
@@ -537,9 +610,15 @@ describe('CustomerService', () => {
         phone: '13800138000',
         createdAt: completedAt,
       })
-      attributionRepo.find.mockResolvedValueOnce([{ id: 'attribution-123', customerId: 'customer-123' }])
-      customerCouponRepo.find.mockResolvedValueOnce([{ id: 'coupon-123', customerId: 'customer-123' }])
-      redemptionRepo.find.mockResolvedValueOnce([{ id: 'redemption-123', customerId: 'customer-123' }])
+      attributionRepo.find.mockResolvedValueOnce([
+        { id: 'attribution-123', customerId: 'customer-123' },
+      ])
+      customerCouponRepo.find.mockResolvedValueOnce([
+        { id: 'coupon-123', customerId: 'customer-123' },
+      ])
+      redemptionRepo.find.mockResolvedValueOnce([
+        { id: 'redemption-123', customerId: 'customer-123' },
+      ])
 
       const result = await service.downloadPersonalDataExport('customer-123', 'request-123')
 
@@ -567,9 +646,9 @@ describe('CustomerService', () => {
         status: 'failed',
       })
 
-      await expect(service.downloadPersonalDataExport('customer-123', 'request-123')).rejects.toThrow(
-        BadRequestException,
-      )
+      await expect(
+        service.downloadPersonalDataExport('customer-123', 'request-123'),
+      ).rejects.toThrow(BadRequestException)
     })
   })
 })

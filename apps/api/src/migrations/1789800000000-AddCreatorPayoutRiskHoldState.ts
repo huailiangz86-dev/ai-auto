@@ -5,7 +5,7 @@ export class AddCreatorPayoutRiskHoldState1789800000000 implements MigrationInte
 
   async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(
-      'ALTER TABLE "creator_task_payouts" ADD COLUMN "risk_hold_previous_status" character varying(24)',
+      'ALTER TABLE "creator_task_payouts" ADD COLUMN IF NOT EXISTS "risk_hold_previous_status" character varying(24)',
     )
     await queryRunner.query(
       `UPDATE "creator_task_payouts" AS payout

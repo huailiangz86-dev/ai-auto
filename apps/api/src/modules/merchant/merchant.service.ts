@@ -245,6 +245,10 @@ export class MerchantService {
       storeId: s.id,
       storeName: s.storeName,
       storeCode: s.storeCode,
+      province: s.province,
+      city: s.city,
+      district: s.district,
+      addressDetail: s.addressDetail,
       address: [s.province, s.city, s.district, s.addressDetail].filter(Boolean).join(''),
       latitude: s.latitude,
       longitude: s.longitude,
@@ -338,6 +342,10 @@ export class MerchantService {
 
     const allowedFields = [
       'storeName',
+      'storeCode',
+      'province',
+      'city',
+      'district',
       'addressDetail',
       'latitude',
       'longitude',

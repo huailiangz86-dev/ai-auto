@@ -12,28 +12,28 @@ export class AddAppealAdjudicationAccounting1790100000000 implements MigrationIn
       `ALTER TYPE "audit_logs_action_type_enum" ADD VALUE IF NOT EXISTS 'creator_task_appeal_adjudicated'`,
     )
     await queryRunner.query(
-      `ALTER TABLE "creator_task_payouts" ADD COLUMN "adjudicated_amount" numeric(14,2)`,
+      `ALTER TABLE "creator_task_payouts" ADD COLUMN IF NOT EXISTS "adjudicated_amount" numeric(14,2)`,
     )
     await queryRunner.query(
-      `ALTER TABLE "creator_task_payouts" ADD COLUMN "adjudicated_at" TIMESTAMP WITH TIME ZONE`,
+      `ALTER TABLE "creator_task_payouts" ADD COLUMN IF NOT EXISTS "adjudicated_at" TIMESTAMP WITH TIME ZONE`,
     )
     await queryRunner.query(
-      `ALTER TABLE "creator_task_appeals" ADD COLUMN "adjudication_decision" character varying(24)`,
+      `ALTER TABLE "creator_task_appeals" ADD COLUMN IF NOT EXISTS "adjudication_decision" character varying(24)`,
     )
     await queryRunner.query(
-      `ALTER TABLE "creator_task_appeals" ADD COLUMN "amount_before" numeric(14,2)`,
+      `ALTER TABLE "creator_task_appeals" ADD COLUMN IF NOT EXISTS "amount_before" numeric(14,2)`,
     )
     await queryRunner.query(
-      `ALTER TABLE "creator_task_appeals" ADD COLUMN "amount_after" numeric(14,2)`,
+      `ALTER TABLE "creator_task_appeals" ADD COLUMN IF NOT EXISTS "amount_after" numeric(14,2)`,
     )
     await queryRunner.query(
-      `ALTER TABLE "creator_task_appeals" ADD COLUMN "financial_ledger_entry_ids" jsonb NOT NULL DEFAULT '[]'::jsonb`,
+      `ALTER TABLE "creator_task_appeals" ADD COLUMN IF NOT EXISTS "financial_ledger_entry_ids" jsonb NOT NULL DEFAULT '[]'::jsonb`,
     )
     await queryRunner.query(
-      `ALTER TABLE "agent_wallets" ADD COLUMN "recovery_receivable_balance" numeric(14,2) NOT NULL DEFAULT 0`,
+      `ALTER TABLE "agent_wallets" ADD COLUMN IF NOT EXISTS "recovery_receivable_balance" numeric(14,2) NOT NULL DEFAULT 0`,
     )
     await queryRunner.query(
-      `ALTER TABLE "agent_wallets" ADD COLUMN "total_recovered" numeric(14,2) NOT NULL DEFAULT 0`,
+      `ALTER TABLE "agent_wallets" ADD COLUMN IF NOT EXISTS "total_recovered" numeric(14,2) NOT NULL DEFAULT 0`,
     )
     await queryRunner.query(`
       CREATE OR REPLACE FUNCTION prevent_immutable_financial_history_mutation()
@@ -44,14 +44,19 @@ export class AddAppealAdjudicationAccounting1790100000000 implements MigrationIn
       $$ LANGUAGE plpgsql
     `)
     await queryRunner.query(`
-      CREATE TRIGGER financial_ledger_entries_immutable
-      BEFORE UPDATE OR DELETE ON "financial_ledger_entries"
-      FOR EACH ROW EXECUTE FUNCTION prevent_immutable_financial_history_mutation()
-    `)
-    await queryRunner.query(`
-      CREATE TRIGGER audit_logs_immutable
-      BEFORE UPDATE OR DELETE ON "audit_logs"
-      FOR EACH ROW EXECUTE FUNCTION prevent_immutable_financial_history_mutation()
+      DO $$
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'financial_ledger_entries_immutable') THEN
+          CREATE TRIGGER financial_ledger_entries_immutable
+          BEFORE UPDATE OR DELETE ON "financial_ledger_entries"
+          FOR EACH ROW EXECUTE FUNCTION prevent_immutable_financial_history_mutation();
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'audit_logs_immutable') THEN
+          CREATE TRIGGER audit_logs_immutable
+          BEFORE UPDATE OR DELETE ON "audit_logs"
+          FOR EACH ROW EXECUTE FUNCTION prevent_immutable_financial_history_mutation();
+        END IF;
+      END $$;
     `)
   }
 

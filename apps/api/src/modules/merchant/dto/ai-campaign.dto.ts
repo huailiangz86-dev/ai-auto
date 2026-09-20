@@ -10,12 +10,16 @@ import {
   IsNumber,
   IsEnum,
   IsDateString,
+  IsBoolean,
+  IsObject,
   Min,
   Max,
   MaxLength,
 } from 'class-validator'
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
 import { CampaignType } from '@ai-auto/shared'
+
+export type AICampaignTaskType = 'customer_campaign' | 'creator_content'
 
 // ---- AI 生成活动请求 ----
 export class CreateAICampaignDto {
@@ -44,6 +48,16 @@ export class CreateAICampaignDto {
   @IsNumber()
   @Min(0)
   maxBudget?: number
+
+  @ApiPropertyOptional({ description: '预览后确认采用的 AI 方案' })
+  @IsOptional()
+  @IsObject()
+  selectedOption?: Record<string, unknown>
+
+  @ApiPropertyOptional({ description: '是否在创建后直接发布；默认不发布，需完成测量预登记' })
+  @IsOptional()
+  @IsBoolean()
+  autoPublish?: boolean
 }
 
 // ---- AI 返回的活动配置方案 ----
@@ -53,6 +67,12 @@ export class AICampaignPlanDto {
 
   @ApiProperty({ description: '方案标题' })
   title!: string
+
+  @ApiProperty({
+    description: '执行类型：普通客户优惠活动或达人内容引流任务',
+    enum: ['customer_campaign', 'creator_content'],
+  })
+  taskType!: AICampaignTaskType
 
   @ApiProperty({ description: '活动类型' })
   campaignType!: CampaignType
@@ -74,6 +94,12 @@ export class AICampaignPlanDto {
 
   @ApiPropertyOptional({ description: '优惠券面值（满减金额）' })
   discountAmount?: number
+
+  @ApiPropertyOptional({ description: '组合套餐活动价' })
+  offerPrice?: number
+
+  @ApiPropertyOptional({ description: '组合套餐原价' })
+  originalPrice?: number
 
   @ApiPropertyOptional({ description: '满减门槛' })
   thresholdAmount?: number
@@ -98,6 +124,21 @@ export class AICampaignPlanDto {
 
   @ApiPropertyOptional({ description: 'AI 对该方案的解释' })
   explanation?: string
+
+  @ApiPropertyOptional({ description: '达人任务内容 Brief' })
+  contentBrief?: string
+
+  @ApiPropertyOptional({ description: '达人任务内容形式' })
+  contentTypes?: string[]
+
+  @ApiPropertyOptional({ description: '达人任务发布渠道' })
+  channels?: string[]
+
+  @ApiPropertyOptional({ description: '达人任务引导动作' })
+  callToAction?: string
+
+  @ApiPropertyOptional({ description: 'AI 置信度（0-1）' })
+  confidence?: number
 }
 
 // ---- AI 生成结果响应 ----
@@ -105,8 +146,8 @@ export class CreateAICampaignResponseDto {
   @ApiProperty({ description: '活动ID' })
   campaignId!: string
 
-  @ApiProperty({ description: '优惠券ID' })
-  couponId!: string
+  @ApiPropertyOptional({ description: '活动转化优惠券ID；达人内容通过专属链接引导领取' })
+  couponId?: string | null
 
   @ApiPropertyOptional({ description: '券码' })
   couponCode?: string
@@ -117,9 +158,67 @@ export class CreateAICampaignResponseDto {
   @ApiProperty({ description: '活动状态' })
   campaignStatus!: string
 
-  @ApiProperty({ description: '优惠券状态' })
-  couponStatus!: string
+  @ApiPropertyOptional({ description: '活动转化优惠券状态' })
+  couponStatus?: string | null
+
+  @ApiProperty({ description: '执行类型', enum: ['customer_campaign', 'creator_content'] })
+  taskType!: AICampaignTaskType
 
   @ApiPropertyOptional({ description: 'AI 生成的方案摘要' })
   planSummary?: AICampaignPlanDto
+}
+
+// ---- AI 活动预览 ----
+export class AICampaignPreviewResponseDto {
+  @ApiProperty({ description: '本次 AI 预览请求 ID' })
+  requestId!: string
+
+  @ApiProperty({ description: '活动自然语言描述' })
+  description!: string
+
+  @ApiProperty({ description: 'AI 生成或本地降级的方案列表', type: [AICampaignPlanDto] })
+  options!: AICampaignPlanDto[]
+
+  @ApiProperty({ description: '方案来源', enum: ['ai', 'fallback'] })
+  source!: 'ai' | 'fallback'
+}
+
+// ---- AI 营销商品生成 ----
+export class GenerateAIMarketingProductDto {
+  @ApiProperty({
+    description: '营销商品自然语言描述',
+    example: '生成一个双人火锅套餐，原价298，售价198',
+  })
+  @IsNotEmpty({ message: '商品描述不能为空' })
+  @IsString()
+  @MaxLength(2000)
+  prompt!: string
+
+  @ApiPropertyOptional({ description: '商品类目提示' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  category?: string
+}
+
+export class AIMarketingProductSkuDto {
+  skuName!: string
+  skuCode!: string
+  spec?: string | null
+  price!: number
+  marketPrice?: number | null
+  attributes!: Record<string, string>
+}
+
+export class AIMarketingProductDraftDto {
+  productName!: string
+  category!: string
+  description!: string
+  skus!: AIMarketingProductSkuDto[]
+}
+
+export class GenerateAIMarketingProductResponseDto {
+  requestId!: string
+  product!: AIMarketingProductDraftDto
+  usage?: Record<string, unknown>
 }

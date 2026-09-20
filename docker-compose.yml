@@ -25,13 +25,13 @@ services:
       POSTGRES_PASSWORD: ai_auto_dev
       POSTGRES_DB: ai_auto_dev
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - '${POSTGRES_PORT:-5432}:5432'
     volumes:
       - postgres_data:/var/lib/postgresql/data
       # Init scripts (run once on first start)
       - ./infrastructure/docker/postgres/init-scripts:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ai_auto -d ai_auto_dev"]
+      test: ['CMD-SHELL', 'pg_isready -U ai_auto -d ai_auto_dev']
       interval: 10s
       timeout: 5s
       retries: 5
@@ -46,11 +46,11 @@ services:
     restart: unless-stopped
     command: redis-server --appendonly yes --requirepass redis_dev_password
     ports:
-      - "6379:6379"
+      - '6379:6379'
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "redis_dev_password", "ping"]
+      test: ['CMD', 'redis-cli', '-a', 'redis_dev_password', 'ping']
       interval: 10s
       timeout: 5s
       retries: 5
@@ -64,7 +64,7 @@ services:
     restart: unless-stopped
     command: redis-server --appendonly yes --requirepass redis_rate_limit_password
     ports:
-      - "6380:6379"
+      - '6380:6379'
     volumes:
       - redis_rate_limit_data:/data
     networks:
@@ -83,10 +83,26 @@ services:
       REDIS_URL: redis://:redis_dev_password@redis:6379/1
       CELERY_BROKER_URL: redis://:redis_dev_password@redis:6379/2
       CELERY_RESULT_BACKEND: redis://:redis_dev_password@redis:6379/3
+      DEFAULT_LLM_PROVIDER: ${DEFAULT_LLM_PROVIDER:-qwen}
+      LLM_FALLBACK_PROVIDER: ${LLM_FALLBACK_PROVIDER:-doubao}
+      LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-60}
+      LLM_MAX_RETRIES: ${LLM_MAX_RETRIES:-2}
+      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-}
+      DASHSCOPE_BASE_URL: ${DASHSCOPE_BASE_URL:-https://dashscope.aliyuncs.com/api/v1}
+      DASHSCOPE_TEXT_BASE_URL: ${DASHSCOPE_TEXT_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
+      DASHSCOPE_IMAGE_BASE_URL: ${DASHSCOPE_IMAGE_BASE_URL:-https://dashscope.aliyuncs.com/api/v1}
+      QWEN_DEFAULT_MODEL: ${QWEN_DEFAULT_MODEL:-qwen-plus}
+      QWEN_IMAGE_MODEL: ${QWEN_IMAGE_MODEL:-qwen-image-3.0}
+      DOUBAO_API_KEY: ${DOUBAO_API_KEY:-}
+      DOUBAO_BASE_URL: ${DOUBAO_BASE_URL:-https://ark.cn-beijing.volces.com/api/v3}
+      DOUBAO_DEFAULT_MODEL: ${DOUBAO_DEFAULT_MODEL:-doubao-seed-2-0-lite-260215}
+      SEEDANCE_MODEL: ${SEEDANCE_MODEL:-doubao-seedance-2-0-260128}
+      SEEDANCE_GENERATE_AUDIO: ${SEEDANCE_GENERATE_AUDIO:-true}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      AI_AGENT_PUBLIC_URL: ${AI_AGENT_PUBLIC_URL:-http://localhost:8000}
     ports:
-      - "8000:8000"
+      - '8000:8000'
     depends_on:
       postgres:
         condition: service_healthy
@@ -110,15 +126,15 @@ services:
       DB_USERNAME: ai_auto
       DB_PASSWORD: ai_auto_dev
       DB_NAME: ai_auto_dev
-      DB_SYNCHRONIZE: "true"  # Only for local dev!
+      DB_SYNCHRONIZE: 'true' # Only for local dev!
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_PASSWORD: redis_dev_password
       JWT_SECRET: dev-secret-change-in-production
       AI_AGENT_SERVICE_URL: http://ai-agent:8000
-      CORS_ORIGINS: "http://localhost:3100"
+      CORS_ORIGINS: 'http://localhost:3100'
     ports:
-      - "3000:3000"
+      - '3000:3000'
     depends_on:
       postgres:
         condition: service_healthy
@@ -158,7 +174,7 @@ services:
       PGADMIN_DEFAULT_EMAIL: admin@ai-auto.local
       PGADMIN_DEFAULT_PASSWORD: admin_dev
     ports:
-      - "5050:80"
+      - '5050:80'
     depends_on:
       - postgres
     networks:
@@ -172,7 +188,7 @@ services:
     environment:
       REDIS_HOSTS: local:redis:6379:0:redis_dev_password
     ports:
-      - "8081:8081"
+      - '8081:8081'
     depends_on:
       - redis
     networks:

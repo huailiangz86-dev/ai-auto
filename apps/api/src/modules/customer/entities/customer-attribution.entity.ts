@@ -14,6 +14,8 @@ import { Campaign } from '../../campaign/entities/campaign.entity'
 @Index('idx_attr_customer', ['customerId'])
 @Index('idx_attr_agent', ['agentId'])
 @Index('idx_attr_customer_agent', ['customerId', 'agentId'], { unique: true })
+@Index('idx_attr_creator_task', ['creatorTaskId'])
+@Index('idx_attr_tracking_id', ['trackingId'])
 @Index('idx_attr_expire', ['lockExpiredAt'])
 @Index('idx_attr_active', ['customerId', 'lockExpiredAt'])
 // Partitioning note: partition by RANGE (YEAR_MONTH(created_at))
@@ -27,6 +29,16 @@ export class CustomerAttribution extends BaseEntity {
   // Which campaign/channel the customer came through
   @Column({ name: 'campaign_id', type: 'uuid', nullable: true })
   campaignId?: string | null
+
+  // The first eligible creator-content entry point is immutable once the
+  // attribution lock is created. Reports must use this snapshot instead of
+  // inferring a task from the creator later, because one creator can run more
+  // than one task for the same merchant or campaign.
+  @Column({ name: 'creator_task_id', type: 'uuid', nullable: true })
+  creatorTaskId?: string | null
+
+  @Column({ name: 'tracking_id', type: 'varchar', length: 120, nullable: true })
+  trackingId?: string | null
 
   // ---- Attribution Source ----
   @Column({ name: 'source_type', type: 'varchar', length: 30 })

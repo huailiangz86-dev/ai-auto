@@ -8,6 +8,7 @@ import { RolesGuard } from '../auth/guards/roles.guard'
 import {
   ApproveGrowthPlanDto,
   CreateGrowthPlanDto,
+  GrowthIntakeDto,
   ListGrowthPlansDto,
 } from './dto/growth-plan.dto'
 import { RecordIncrementalityMeasurementDto } from './dto/incrementality-measurement.dto'
@@ -32,44 +33,51 @@ export class MerchantGrowthPlanController {
   @Post()
   @ApiOperation({ summary: 'Submit a growth goal and generate reviewable AI alternatives' })
   create(@CurrentUser() user: CurrentUserPayload, @Body() dto: CreateGrowthPlanDto) {
-    return this.service.create(user.merchantId!, dto)
+    return this.service.create(user.merchantId, dto)
+  }
+  @Post('intake')
+  @ApiOperation({ summary: 'Continue the conversational AI growth-goal intake' })
+  intake(@CurrentUser() user: CurrentUserPayload, @Body() dto: GrowthIntakeDto) {
+    return this.service.intake(user.merchantId, dto)
   }
   @Get()
   @ApiOperation({ summary: 'List Growth Plans' })
   list(@CurrentUser() user: CurrentUserPayload, @Query() query: ListGrowthPlansDto) {
-    return this.service.list(user.merchantId!, query)
+    return this.service.list(user.merchantId, query)
   }
   @Get(':planId')
   @ApiOperation({ summary: 'Get Growth Plan assumptions and options' })
   get(@CurrentUser() user: CurrentUserPayload, @Param('planId') planId: string) {
-    return this.service.get(user.merchantId!, planId)
+    return this.service.get(user.merchantId, planId)
   }
   @Get(':planId/economics')
   @ApiOperation({ summary: 'Get funded Campaign unit economics and goal progress' })
   economics(@CurrentUser() user: CurrentUserPayload, @Param('planId') planId: string) {
-    return this.funding.economics(user.merchantId!, planId)
+    return this.funding.economics(user.merchantId, planId)
   }
   @Get(':planId/report')
   @ApiOperation({
     summary: 'Get traceable merchant ROI, verified attribution, and incremental measurement report',
   })
   report(@CurrentUser() user: CurrentUserPayload, @Param('planId') planId: string) {
-    return this.reports.report(user.merchantId!, planId)
+    return this.reports.report(user.merchantId, planId)
   }
   @Get(':planId/incrementality')
   @ApiOperation({ summary: 'Get disclosed incrementality measurement or its unmeasured state' })
   incrementalityResult(@CurrentUser() user: CurrentUserPayload, @Param('planId') planId: string) {
-    return this.incrementality.result(user.merchantId!, planId)
+    return this.incrementality.result(user.merchantId, planId)
   }
   @Post(':planId/incrementality')
-  @ApiOperation({ summary: 'Record holdout inputs and calculate disclosed incremental orders and GMV' })
+  @ApiOperation({
+    summary: 'Record holdout inputs and calculate disclosed incremental orders and GMV',
+  })
   async recordIncrementality(
     @CurrentUser() user: CurrentUserPayload,
     @Param('planId') planId: string,
     @Body() dto: RecordIncrementalityMeasurementDto,
   ) {
-    const plan = await this.service.getEntity(user.merchantId!, planId)
-    return this.incrementality.record(user.merchantId!, plan, dto)
+    const plan = await this.service.getEntity(user.merchantId, planId)
+    return this.incrementality.record(user.merchantId, plan, dto)
   }
   @Post(':planId/fund')
   @ApiOperation({
@@ -80,7 +88,7 @@ export class MerchantGrowthPlanController {
     @Param('planId') planId: string,
     @Body() dto: FundGrowthPlanDto,
   ) {
-    return this.funding.fund(user.merchantId!, planId, dto)
+    return this.funding.fund(user.merchantId, planId, dto)
   }
   @Post(':planId/approve')
   @ApiOperation({ summary: 'Approve an option and create the linked Campaign work item' })
@@ -89,6 +97,6 @@ export class MerchantGrowthPlanController {
     @Param('planId') planId: string,
     @Body() dto: ApproveGrowthPlanDto,
   ) {
-    return this.service.approve(user.merchantId!, planId, dto)
+    return this.service.approve(user.merchantId, planId, dto)
   }
 }

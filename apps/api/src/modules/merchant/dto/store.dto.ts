@@ -8,12 +8,9 @@ import {
   IsOptional,
   IsNumber,
   IsBoolean,
-  IsArray,
-  IsPhoneNumber,
   MaxLength,
   Min,
   Max,
-  Matches,
 } from 'class-validator'
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
 
@@ -85,6 +82,30 @@ export class UpdateStoreDto {
   @IsString()
   @MaxLength(200)
   storeName?: string
+
+  @ApiPropertyOptional({ description: '门店编号（商家自用）' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  storeCode?: string
+
+  @ApiPropertyOptional({ description: '省份' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  province?: string
+
+  @ApiPropertyOptional({ description: '城市' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  city?: string
+
+  @ApiPropertyOptional({ description: '区县' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  district?: string
 
   @ApiPropertyOptional({ description: '详细地址' })
   @IsOptional()

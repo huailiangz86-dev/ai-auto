@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { AuditActionType, AuditStatus, UserRole } from '@ai-auto/shared'
+import { randomUUID } from 'crypto'
 import { DataSource, EntityManager, Repository } from 'typeorm'
 import { AuditLog } from '../admin/entities/audit-log.entity'
 import { FinancialLedgerEntry } from '../admin/entities/financial-ledger-entry.entity'
@@ -76,6 +77,7 @@ export class GrowthTaskService {
     return this.growthRepo.save(
       this.growthRepo.create({
         ...dto,
+        taskType: dto.taskType ?? 'creator_content',
         merchantId,
         storeId: dto.storeId ?? null,
         campaignId: dto.campaignId ?? null,
@@ -153,6 +155,8 @@ export class GrowthTaskService {
     return this.dataSource.transaction(async (manager) => {
       const growth = await manager.findOne(GrowthTask, { where: { id: growthTaskId, merchantId } })
       if (!growth) throw new NotFoundException('Growth Task 不存在')
+      if (growth.taskType === 'customer_campaign')
+        throw new BadRequestException('客户优惠活动不能创建达人内容任务')
       if (growth.status !== 'active')
         throw new BadRequestException('仅活跃的 Growth Task 可以创建创作者任务')
       if (deadline > growth.endAt)
@@ -181,7 +185,7 @@ export class GrowthTaskService {
         performanceReward: dto.performanceReward ?? {},
         campaignCreditsAllocated: credits,
         campaignCreditsConsumed: 0,
-        trackingId: dto.trackingId ?? null,
+        trackingId: randomUUID(),
         status: 'created',
       })
       const saved = await manager.save(task)
@@ -237,6 +241,7 @@ export class GrowthTaskService {
     target: CreatorTaskStatus,
     publishedUrl?: string,
     stateReason?: string,
+    submissionEvidence?: Record<string, unknown>,
   ) {
     if (
       ![
@@ -254,7 +259,7 @@ export class GrowthTaskService {
       creatorTaskId,
       target,
       { id: creatorId, type: 'creator' },
-      { creatorId, publishedUrl, stateReason },
+      { creatorId, publishedUrl, stateReason, submissionEvidence },
     )
   }
 
@@ -336,6 +341,43 @@ export class GrowthTaskService {
       target === 'approved' ? '创作者任务审核通过' : '创作者任务审核未通过',
       target === 'approved' ? '你的任务已审核通过，可继续发布。' : `驳回原因：${reason}`,
       { decision, reason },
+    )
+    return task
+  }
+
+  /**
+   * Merchant review is intentionally separate from platform operations review:
+   * the merchant decides commercial and brand fit, while operations retains
+   * escalation, risk-hold, and appeal authority.
+   */
+  async reviewCreatorTaskForMerchant(
+    merchantId: string,
+    creatorTaskId: string,
+    reviewerId: string,
+    decision: 'approve' | 'reject',
+    reason: string,
+  ) {
+    const target: CreatorTaskStatus = decision === 'approve' ? 'approved' : 'rejected'
+    const task = await this.transitionCreatorTask(
+      creatorTaskId,
+      target,
+      { id: merchantId, type: 'merchant' },
+      {
+        merchantId,
+        reviewReason: reason,
+        stateReason: reason,
+        reviewedBy: reviewerId,
+        reviewedAt: new Date(),
+      },
+      AuditActionType.CREATOR_TASK_REVIEWED,
+    )
+    await this.notifyCreator(
+      task.creatorId,
+      task.id,
+      'creator_task_merchant_reviewed',
+      target === 'approved' ? '商家已通过内容审核' : '商家打回了内容审核',
+      target === 'approved' ? '内容符合任务要求，可登记发布链接。' : `修改说明：${reason}`,
+      { decision, reason, reviewedBy: reviewerId },
     )
     return task
   }
@@ -643,6 +685,18 @@ export class GrowthTaskService {
       task.stateChangedAt = new Date()
       if (options.publishedUrl) task.publishedUrl = String(options.publishedUrl)
       if (options.stateReason !== undefined) task.stateReason = String(options.stateReason)
+      const submissionEvidence = options.submissionEvidence
+      if (
+        target === 'submitted' &&
+        submissionEvidence &&
+        typeof submissionEvidence === 'object' &&
+        !Array.isArray(submissionEvidence)
+      ) {
+        task.submissionEvidence = {
+          ...(submissionEvidence as Record<string, unknown>),
+          submittedAt: task.stateChangedAt.toISOString(),
+        }
+      }
       if (options.reviewReason !== undefined) task.reviewReason = String(options.reviewReason)
       if (options.reviewedBy) task.reviewedBy = String(options.reviewedBy)
       if (options.reviewedAt) task.reviewedAt = options.reviewedAt as Date

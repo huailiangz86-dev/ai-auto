@@ -40,26 +40,44 @@ def _extract_json_object(value: str) -> dict[str, Any]:
 
 
 async def _generate_openai_compatible_json(
-    *, provider: str, api_key: str | None, base_url: str, model: str, system: str, prompt: str,
+    *,
+    provider: str,
+    api_key: str | None,
+    base_url: str,
+    model: str,
+    system: str,
+    prompt: str,
     max_tokens: int,
 ) -> tuple[dict[str, Any], dict[str, int | str]]:
     if not api_key:
         raise AIProviderUnavailableError(f"{provider} API key is not configured")
 
-    async with httpx.AsyncClient(timeout=settings.LLM_TIMEOUT_SECONDS) as client:
+    # Local development shells may expose a SOCKS proxy that is unavailable to
+    # httpx. The configured DashScope/Ark endpoints should be called directly,
+    # matching the provider clients used by the sibling ViralForge project.
+    async with httpx.AsyncClient(
+        timeout=settings.LLM_TIMEOUT_SECONDS,
+        trust_env=False,
+        proxy=None,
+    ) as client:
         response = await client.post(
             f"{base_url.rstrip('/')}/chat/completions",
             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
             json={
                 "model": model,
-                "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}],
+                "messages": [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": prompt},
+                ],
                 "temperature": 0.3,
                 "max_tokens": max_tokens,
                 "response_format": {"type": "json_object"},
             },
         )
     if response.is_error:
-        raise AIProviderResponseError(f"{provider} request failed with status {response.status_code}")
+        raise AIProviderResponseError(
+            f"{provider} request failed with status {response.status_code}"
+        )
 
     body = response.json()
     try:
@@ -79,7 +97,10 @@ async def _generate_openai_compatible_json(
 
 
 async def _generate_anthropic_json(
-    *, system: str, prompt: str, max_tokens: int,
+    *,
+    system: str,
+    prompt: str,
+    max_tokens: int,
 ) -> tuple[dict[str, Any], dict[str, int | str]]:
     if not settings.ANTHROPIC_API_KEY:
         raise AIProviderUnavailableError("ANTHROPIC_API_KEY is not configured")
@@ -110,7 +131,11 @@ async def _generate_anthropic_json(
 
 
 async def _generate_for_provider(
-    provider: str, *, system: str, prompt: str, max_tokens: int,
+    provider: str,
+    *,
+    system: str,
+    prompt: str,
+    max_tokens: int,
 ) -> tuple[dict[str, Any], dict[str, int | str]]:
     if provider == "qwen":
         return await _generate_openai_compatible_json(
@@ -138,7 +163,10 @@ async def _generate_for_provider(
 
 
 async def generate_json(
-    *, system: str, prompt: str, max_tokens: int = 1600,
+    *,
+    system: str,
+    prompt: str,
+    max_tokens: int = 1600,
 ) -> tuple[dict[str, Any], dict[str, int | str]]:
     """Generate schema-shaped JSON using the configured provider and fallback."""
     providers = [settings.DEFAULT_LLM_PROVIDER.lower()]
@@ -150,7 +178,10 @@ async def generate_json(
     for provider in providers:
         try:
             return await _generate_for_provider(
-                provider, system=system, prompt=prompt, max_tokens=max_tokens,
+                provider,
+                system=system,
+                prompt=prompt,
+                max_tokens=max_tokens,
             )
         except (AIProviderUnavailableError, AIProviderResponseError, httpx.HTTPError) as error:
             errors.append(f"{provider}: {error}")

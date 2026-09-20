@@ -5,6 +5,9 @@
 
 import { Entity, Column, ManyToOne, OneToMany, JoinColumn, Index } from 'typeorm'
 import { BaseEntity } from '../../common/entities/base.entity'
+
+export const CAMPAIGN_PURPOSES = ['customer_campaign', 'creator_content'] as const
+export type CampaignPurpose = (typeof CAMPAIGN_PURPOSES)[number]
 import { CampaignType } from '@ai-auto/shared'
 import { Merchant } from '../../merchant/entities/merchant.entity'
 import { Store } from '../../merchant/entities/store.entity'
@@ -31,6 +34,10 @@ export class Campaign extends BaseEntity {
     enum: CampaignType,
   })
   campaignType!: CampaignType
+
+  // campaignType describes the offer; purpose describes who the execution serves.
+  @Column({ name: 'purpose', type: 'varchar', length: 32, default: 'customer_campaign' })
+  purpose!: CampaignPurpose
 
   // ---- Status ----
   // 'draft' | 'active' | 'paused' | 'ended' | 'cancelled'

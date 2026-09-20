@@ -1,4 +1,6 @@
 import {
+  ArrayMaxSize,
+  IsArray,
   IsDateString,
   IsIn,
   IsNotEmpty,
@@ -11,9 +13,15 @@ import {
   MaxLength,
   Min,
 } from 'class-validator'
-import { CREATOR_TASK_STATUSES, CreatorTaskStatus } from '../entities/growth-task.entity'
+import {
+  CREATOR_TASK_STATUSES,
+  GROWTH_TASK_TYPES,
+  CreatorTaskStatus,
+  GrowthTaskType,
+} from '../entities/growth-task.entity'
 
 export class CreateGrowthTaskDto {
+  @IsOptional() @IsIn(GROWTH_TASK_TYPES) taskType?: GrowthTaskType = 'creator_content'
   @IsOptional() @IsUUID() storeId?: string
   @IsOptional() @IsUUID() campaignId?: string
   @IsNotEmpty() @IsString() @MaxLength(80) goalMetric!: string
@@ -64,6 +72,13 @@ export class OperationsQueueQueryDto {
 
 export class PublishCreatorTaskDto {
   @IsUrl({ require_tld: false }) @MaxLength(2000) publishedUrl!: string
+}
+
+/** Evidence shown to the merchant during commercial content review. */
+export class SubmitCreatorTaskDto {
+  @IsOptional() @IsUrl({ require_tld: false }) @MaxLength(2000) draftUrl?: string
+  @IsOptional() @IsString() @MaxLength(2000) note?: string
+  @IsOptional() @IsArray() @ArrayMaxSize(10) @IsUUID('4', { each: true }) contentIds?: string[]
 }
 
 export class ConsumeCampaignCreditsDto {

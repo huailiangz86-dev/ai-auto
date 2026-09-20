@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { InjectRepository } from '@nestjs/typeorm'
 import { AuditActionType, AuditStatus, UserRole } from '@ai-auto/shared'
 import { DataSource, EntityManager, Repository } from 'typeorm'
+import { randomUUID } from 'crypto'
 import { AuditLog } from '../admin/entities/audit-log.entity'
 import { AgentPlatformAccount } from '../agent/entities/agent-platform-account.entity'
 import { SharingAgent } from '../agent/entities/sharing-agent.entity'
@@ -56,6 +57,8 @@ export class CreatorMatchingService {
   async listMatches(merchantId: string, growthTaskId: string, query: CreatorMatchQueryDto) {
     const growth = await this.growthTasks.findOne({ where: { id: growthTaskId, merchantId } })
     if (!growth) throw new NotFoundException('Growth Task 不存在')
+    if (growth.taskType === 'customer_campaign')
+      throw new BadRequestException('当前任务面向普通客户，不支持达人内容匹配')
     if (growth.status !== 'active')
       throw new BadRequestException('请在资金确认后启动 Growth Task，再进行创作者匹配')
     await this.requireFunded(this.allocations, growth)
@@ -79,6 +82,8 @@ export class CreatorMatchingService {
     return this.dataSource.transaction(async (manager) => {
       const growth = await manager.findOne(GrowthTask, { where: { id: growthTaskId, merchantId } })
       if (!growth) throw new NotFoundException('Growth Task 不存在')
+      if (growth.taskType === 'customer_campaign')
+        throw new BadRequestException('当前任务面向普通客户，不支持达人内容邀约')
       if (growth.status !== 'active')
         throw new BadRequestException('仅活跃的 Growth Task 可以发出创作者邀约')
       if (deadline > growth.endAt)
@@ -133,7 +138,7 @@ export class CreatorMatchingService {
           performanceReward: dto.performanceReward ?? {},
           campaignCreditsAllocated: credits,
           campaignCreditsConsumed: 0,
-          trackingId: dto.trackingId ?? null,
+          trackingId: randomUUID(),
           status: 'invited',
           stateChangedBy: merchantId,
           stateChangedAt: now,

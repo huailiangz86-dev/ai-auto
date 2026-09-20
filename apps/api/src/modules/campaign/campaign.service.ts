@@ -10,6 +10,7 @@ import * as crypto from 'crypto'
 
 import { Campaign } from './entities/campaign.entity'
 import { Coupon } from './entities/coupon.entity'
+import { CouponProductMapping } from './entities/coupon-product-mapping.entity'
 import { Merchant } from '../merchant/entities/merchant.entity'
 import { CouponStatus, CampaignType } from '@ai-auto/shared'
 import { PilotMeasurementService } from '../pilot/pilot-measurement.service'
@@ -32,6 +33,8 @@ export class CampaignService {
     private readonly campaignRepo: Repository<Campaign>,
     @InjectRepository(Coupon)
     private readonly couponRepo: Repository<Coupon>,
+    @InjectRepository(CouponProductMapping)
+    private readonly mappingRepo: Repository<CouponProductMapping>,
     @InjectRepository(Merchant)
     private readonly merchantRepo: Repository<Merchant>,
     private readonly dataSource: DataSource,
@@ -82,6 +85,7 @@ export class CampaignService {
       storeId: dto.storeId ?? null,
       campaignName: dto.campaignName,
       campaignType: dto.campaignType,
+      purpose: dto.purpose ?? 'customer_campaign',
       description: dto.description ?? null,
       targetAudience: dto.targetAudience ?? 'all',
       startAt: dto.startAt ? new Date(dto.startAt) : new Date(),
@@ -133,6 +137,7 @@ export class CampaignService {
       campaignId: c.id,
       campaignName: c.campaignName,
       campaignType: c.campaignType,
+      purpose: c.purpose ?? 'customer_campaign',
       status: c.campaignStatus,
       startAt: c.startAt,
       endAt: c.endAt,
@@ -161,7 +166,12 @@ export class CampaignService {
   async getCampaign(merchantId: string, campaignId: string) {
     const campaign = await this.campaignRepo.findOne({
       where: { id: campaignId, merchantId },
-      relations: ['coupons'],
+      relations: [
+        'coupons',
+        'coupons.productMappings',
+        'coupons.productMappings.product',
+        'coupons.productMappings.sku',
+      ],
     })
 
     if (!campaign) {
@@ -172,6 +182,7 @@ export class CampaignService {
       campaignId: campaign.id,
       campaignName: campaign.campaignName,
       campaignType: campaign.campaignType,
+      purpose: campaign.purpose ?? 'customer_campaign',
       status: campaign.campaignStatus,
       description: campaign.description,
       startAt: campaign.startAt,
@@ -196,6 +207,14 @@ export class CampaignService {
         totalStock: coupon.totalStock,
         remainingStock: coupon.remainingStock,
         status: coupon.status,
+        marketingProducts: (coupon.productMappings ?? [])
+          .filter((mapping: any) => mapping.type === 'catalogue' && mapping.product)
+          .map((mapping: any) => ({
+            productId: mapping.product.id,
+            productName: mapping.product.productName,
+            skuId: mapping.sku?.id ?? null,
+            skuName: mapping.sku?.skuName ?? null,
+          })),
       })),
     }
   }
@@ -255,10 +274,34 @@ export class CampaignService {
       })
     }
 
-    if (!campaign.coupons || campaign.coupons.length === 0) {
+    if (
+      (campaign.purpose ?? 'customer_campaign') === 'customer_campaign' &&
+      (!campaign.coupons || campaign.coupons.length === 0)
+    ) {
       throw new BadRequestException({
         code: 4003,
         message: '活动必须至少包含一张优惠券才能发布',
+      })
+    }
+
+    const couponIds = campaign.coupons?.map((coupon) => coupon.id) ?? []
+    const mappings = couponIds.length
+      ? await this.mappingRepo.find({
+          where: { merchantId, couponId: In(couponIds) },
+          relations: ['product', 'sku'],
+        })
+      : []
+    const unavailableCatalogueMapping = mappings.some(
+      (mapping) =>
+        mapping.type === 'catalogue' &&
+        (!mapping.product ||
+          mapping.product.status !== 'on_sale' ||
+          (mapping.skuId != null && (!mapping.sku || mapping.sku.status !== 'on_sale'))),
+    )
+    if (unavailableCatalogueMapping) {
+      throw new BadRequestException({
+        code: 4004,
+        message: '活动关联的营销商品或 SKU 尚未上架，请先上架后再发布活动',
       })
     }
 
@@ -460,6 +503,7 @@ export class CampaignService {
   async getCoupon(merchantId: string, couponId: string) {
     const coupon = await this.couponRepo.findOne({
       where: { id: couponId, merchantId },
+      relations: ['productMappings', 'productMappings.product', 'productMappings.sku'],
     })
 
     if (!coupon) {
@@ -481,6 +525,14 @@ export class CampaignService {
       remainingStock: coupon.remainingStock,
       perCustomerLimit: coupon.perCustomerLimit,
       status: coupon.status,
+      marketingProducts: (coupon.productMappings ?? [])
+        .filter((mapping: any) => mapping.type === 'catalogue' && mapping.product)
+        .map((mapping: any) => ({
+          productId: mapping.product.id,
+          productName: mapping.product.productName,
+          skuId: mapping.sku?.id ?? null,
+          skuName: mapping.sku?.skuName ?? null,
+        })),
       stats: {
         issued: coupon.totalIssued,
         redeemed: coupon.totalRedeemed,

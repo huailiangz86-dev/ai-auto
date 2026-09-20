@@ -10,6 +10,7 @@ import { NotFoundException, BadRequestException } from '@nestjs/common'
 import { CampaignService } from './campaign.service'
 import { Campaign } from './entities/campaign.entity'
 import { Coupon } from './entities/coupon.entity'
+import { CouponProductMapping } from './entities/coupon-product-mapping.entity'
 import { Merchant } from '../merchant/entities/merchant.entity'
 import { CampaignType, CouponStatus } from '@ai-auto/shared'
 import { PilotMeasurementService } from '../pilot/pilot-measurement.service'
@@ -29,6 +30,7 @@ describe('CampaignService', () => {
   let service: CampaignService
   let campaignRepo: any
   let couponRepo: any
+  let mappingRepo: any
   let merchantRepo: any
   let dataSource: any
   let pilotMeasurement: any
@@ -36,6 +38,8 @@ describe('CampaignService', () => {
   beforeEach(async () => {
     campaignRepo = createMockRepo()
     couponRepo = createMockRepo()
+    mappingRepo = createMockRepo()
+    mappingRepo.find.mockResolvedValue([])
     merchantRepo = createMockRepo()
     dataSource = {
       transaction: jest.fn((fn: (manager: any) => Promise<any>) => fn({})),
@@ -47,6 +51,7 @@ describe('CampaignService', () => {
         CampaignService,
         { provide: getRepositoryToken(Campaign), useValue: campaignRepo },
         { provide: getRepositoryToken(Coupon), useValue: couponRepo },
+        { provide: getRepositoryToken(CouponProductMapping), useValue: mappingRepo },
         { provide: getRepositoryToken(Merchant), useValue: merchantRepo },
         { provide: DataSource, useValue: dataSource },
         { provide: PilotMeasurementService, useValue: pilotMeasurement },
@@ -280,6 +285,24 @@ describe('CampaignService', () => {
       )
     })
 
+    it('达人内容活动没有优惠券也可以进入发布测量流程', async () => {
+      campaignRepo.findOne.mockResolvedValueOnce({
+        id: 'campaign-creator',
+        purpose: 'creator_content',
+        campaignStatus: 'draft',
+        coupons: [],
+      })
+      campaignRepo.save.mockResolvedValueOnce({ id: 'campaign-creator' })
+
+      const result = await service.publishCampaign('merchant-123', 'campaign-creator')
+
+      expect(result.code).toBe(0)
+      expect(pilotMeasurement.assertActivationAllowed).toHaveBeenCalledWith(
+        'merchant-123',
+        'campaign-creator',
+      )
+    })
+
     it('未预登记测量协议时阻止发布', async () => {
       campaignRepo.findOne.mockResolvedValueOnce({
         id: 'campaign-1',
@@ -294,6 +317,27 @@ describe('CampaignService', () => {
         BadRequestException,
       )
       expect(campaignRepo.save).not.toHaveBeenCalled()
+    })
+
+    it('关联的营销商品仍为草稿时阻止发布', async () => {
+      campaignRepo.findOne.mockResolvedValueOnce({
+        id: 'campaign-1',
+        campaignStatus: 'draft',
+        coupons: [{ id: 'coupon-1' }],
+      })
+      mappingRepo.find.mockResolvedValueOnce([
+        {
+          type: 'catalogue',
+          product: { status: 'draft' },
+          productId: 'product-1',
+          skuId: null,
+        },
+      ])
+
+      await expect(service.publishCampaign('merchant-123', 'campaign-1')).rejects.toThrow(
+        BadRequestException,
+      )
+      expect(pilotMeasurement.assertActivationAllowed).not.toHaveBeenCalled()
     })
 
     it('发布成功', async () => {

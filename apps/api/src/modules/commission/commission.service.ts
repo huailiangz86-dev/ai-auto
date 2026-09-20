@@ -424,7 +424,10 @@ export class CommissionService {
       cashRewardAmount: customerCoupon.cashRewardAmount ?? null,
       transactionAmount,
       discountValue,
-      agentRewardAmount: discountValue,
+      // The coupon rule, not the discount face value, is the merchant's
+      // conversion-reward pool. Keeping both snapshots separate lets the
+      // merchant distinguish discount cost from creator/platform commission.
+      agentRewardAmount: Number(customerCoupon.coupon?.agentRewardAmount ?? 0),
       couponCode,
       merchantTransactionId: merchantTransactionId ?? null,
       presentedAt: presentedAt ? new Date(presentedAt) : now,
@@ -456,8 +459,12 @@ export class CommissionService {
       verifiedBy: null,
     } as any)
     await this.instrumentation.recordVerifiedRedemption({
-      redemptionId: savedRedemption.id, merchantId, campaignId: customerCoupon.coupon?.campaignId ?? null,
-      creatorId: customerCoupon.agentId ?? null, occurredAt: now, transactionAmount: Number(transactionAmount),
+      redemptionId: savedRedemption.id,
+      merchantId,
+      campaignId: customerCoupon.coupon?.campaignId ?? null,
+      creatorId: customerCoupon.agentId ?? null,
+      occurredAt: now,
+      transactionAmount: Number(transactionAmount),
       attributionId: customerCoupon.attributionId ?? null,
     })
     await this.gamificationService.awardForRedemption(customerCoupon.customerId, savedRedemption.id)

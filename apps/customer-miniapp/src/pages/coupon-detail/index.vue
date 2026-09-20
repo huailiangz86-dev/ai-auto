@@ -38,6 +38,7 @@ const amount = ref('0')
 const threshold = ref('0')
 const validUntil = ref('')
 const agentId = ref('')
+const trackingId = ref('')
 const trackingConsent = ref(false)
 
 onLoad(async (query) => {
@@ -48,14 +49,10 @@ onLoad(async (query) => {
   threshold.value = query?.threshold || '0'
   validUntil.value = query?.validUntil || ''
   agentId.value = query?.agentId || ''
+  trackingId.value = query?.trackingId || ''
 
-  if (agentId.value) {
-    try {
-      await usePromotionStore().captureReferral(agentId.value, couponId.value)
-    } catch {
-      // 未登录时仅保留来源；登录或领券时会继续建立归属。
-    }
-  }
+  // 落地时只暂存来源；只有用户在领券页明确同意后才会建立归因记录。
+  usePromotionStore().stageReferral({ agentId: agentId.value, trackingId: trackingId.value })
 
   if (couponId.value && !query?.couponName) {
     try {

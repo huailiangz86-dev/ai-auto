@@ -3,6 +3,13 @@ import { BaseEntity } from '../../common/entities/base.entity'
 
 export type GrowthTaskStatus =
   'draft' | 'ready_for_review' | 'active' | 'paused' | 'completed' | 'cancelled'
+export const GROWTH_TASK_TYPES = ['customer_campaign', 'creator_content'] as const
+export type GrowthTaskType = (typeof GROWTH_TASK_TYPES)[number]
+
+export const GROWTH_TASK_TYPE_LABELS: Record<GrowthTaskType, string> = {
+  customer_campaign: '客户优惠活动',
+  creator_content: '达人内容引流任务',
+}
 export const CREATOR_TASK_STATUSES = [
   'created',
   'matching',
@@ -31,6 +38,8 @@ export class GrowthTask extends BaseEntity {
   @Column({ name: 'merchant_id', type: 'uuid' }) merchantId!: string
   @Column({ name: 'store_id', type: 'uuid', nullable: true }) storeId?: string | null
   @Column({ name: 'campaign_id', type: 'uuid', nullable: true }) campaignId?: string | null
+  @Column({ name: 'task_type', type: 'varchar', length: 32, default: 'customer_campaign' })
+  taskType!: GrowthTaskType
   @Column({ name: 'goal_metric', type: 'varchar', length: 80 }) goalMetric!: string
   @Column({ name: 'baseline_value', type: 'decimal', precision: 14, scale: 2, default: 0 })
   baselineValue!: number
@@ -97,6 +106,11 @@ export class CreatorTask extends BaseEntity {
   @Column({ name: 'tracking_id', type: 'varchar', length: 120, nullable: true }) trackingId?:
     string | null
   @Column({ name: 'published_url', type: 'text', nullable: true }) publishedUrl?: string | null
+  // The creator submits a minimal, immutable-at-review snapshot. It can point
+  // to a draft, describe an off-platform deliverable, and reference generated
+  // content evidence without storing a consumer's personal information.
+  @Column({ name: 'submission_evidence', type: 'jsonb', default: () => "'{}'::jsonb" })
+  submissionEvidence!: Record<string, unknown>
   @Column({ type: 'varchar', length: 24, default: 'created' }) status!: CreatorTaskStatus
   @Column({ name: 'compensation_snapshot', type: 'jsonb', nullable: true })
   compensationSnapshot?: Record<string, unknown> | null

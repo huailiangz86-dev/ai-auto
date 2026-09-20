@@ -9,7 +9,7 @@ export class AddCreatorPayoutRecoveryOffset1790200000000 implements MigrationInt
 
   async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(
-      `ALTER TABLE "creator_task_payouts" ADD COLUMN "recovery_offset_amount" numeric(14,2) NOT NULL DEFAULT 0`,
+      `ALTER TABLE "creator_task_payouts" ADD COLUMN IF NOT EXISTS "recovery_offset_amount" numeric(14,2) NOT NULL DEFAULT 0`,
     )
   }
 

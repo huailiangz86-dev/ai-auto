@@ -9,6 +9,7 @@ import {
   IsNumber,
   IsBoolean,
   IsEnum,
+  IsIn,
   IsDateString,
   Min,
   Max,
@@ -20,6 +21,7 @@ import {
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
 import { Type } from 'class-transformer'
 import { CampaignType } from '@ai-auto/shared'
+import { CAMPAIGN_PURPOSES, CampaignPurpose } from '../entities/campaign.entity'
 
 // ---- 创建活动 ----
 export class CreateCampaignDto {
@@ -38,6 +40,14 @@ export class CreateCampaignDto {
   @IsNotEmpty({ message: '活动类型不能为空' })
   @IsEnum(CampaignType)
   campaignType!: CampaignType
+
+  @ApiPropertyOptional({
+    description: '执行目的：普通客户优惠活动或达人内容引流任务',
+    enum: CAMPAIGN_PURPOSES,
+  })
+  @IsOptional()
+  @IsIn(CAMPAIGN_PURPOSES)
+  purpose?: CampaignPurpose
 
   @ApiPropertyOptional({ description: '活动描述' })
   @IsOptional()

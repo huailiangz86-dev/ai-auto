@@ -249,7 +249,16 @@ describe('MerchantService', () => {
   describe('listStores()', () => {
     it('返回门店专属与全门店有效分享员的去重数量', async () => {
       const stores = [
-        { id: 'store-1', storeName: '望京店', status: true, createdAt: new Date('2026-08-01') },
+        {
+          id: 'store-1',
+          storeName: '望京店',
+          province: '北京市',
+          city: '北京市',
+          district: '朝阳区',
+          addressDetail: '望京街 1 号',
+          status: true,
+          createdAt: new Date('2026-08-01'),
+        },
         { id: 'store-2', storeName: '五道口店', status: true, createdAt: new Date('2026-08-02') },
       ]
       storeRepo.findAndCount.mockResolvedValueOnce([stores, 2])
@@ -264,6 +273,13 @@ describe('MerchantService', () => {
       const result = await service.listStores('merchant-123')
 
       expect(result.items.map((item) => item.agentCount)).toEqual([2, 2])
+      expect(result.items[0]).toMatchObject({
+        province: '北京市',
+        city: '北京市',
+        district: '朝阳区',
+        addressDetail: '望京街 1 号',
+        address: '北京市北京市朝阳区望京街 1 号',
+      })
       expect(merchantAgentBindingRepo.find).toHaveBeenCalledWith({
         where: { merchantId: 'merchant-123', bindingStatus: 'active' },
         select: ['agentId', 'storeId'],
@@ -326,6 +342,49 @@ describe('MerchantService', () => {
       const result = await service.createStore('merchant-123', dto)
 
       expect(result.storeId).toBe('store-new')
+    })
+  })
+
+  // ========================
+  // updateStore()
+  // ========================
+
+  describe('updateStore()', () => {
+    it('更新门店可维护的完整地址、编号和状态', async () => {
+      const store = {
+        id: 'store-123',
+        merchantId: 'merchant-123',
+        storeName: '旧门店名',
+        storeCode: 'STORE-001',
+        province: '北京市',
+        city: '北京市',
+        district: '朝阳区',
+        addressDetail: '旧地址',
+        status: true,
+      }
+      storeRepo.findOne.mockResolvedValueOnce(store)
+
+      await service.updateStore('merchant-123', 'store-123', {
+        storeName: '新门店名',
+        storeCode: 'STORE-002',
+        province: '上海市',
+        city: '上海市',
+        district: '静安区',
+        addressDetail: '新地址',
+        status: false,
+      })
+
+      expect(storeRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          storeName: '新门店名',
+          storeCode: 'STORE-002',
+          province: '上海市',
+          city: '上海市',
+          district: '静安区',
+          addressDetail: '新地址',
+          status: false,
+        }),
+      )
     })
   })
 

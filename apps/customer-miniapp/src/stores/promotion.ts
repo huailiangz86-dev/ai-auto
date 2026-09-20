@@ -9,27 +9,42 @@ import { useAuthStore } from './auth'
 import type { PromotionPerformance, ShareContext } from '../types/customer'
 
 const REFERRAL_AGENT_KEY = 'pending_referral_agent_id'
+const REFERRAL_TRACKING_KEY = 'pending_referral_tracking_id'
 const REFERRAL_ATTRIBUTION_KEY = 'pending_referral_attribution_id'
 
 export const usePromotionStore = defineStore('customer-promotion', {
   state: () => ({
     pendingAgentId: uni.getStorageSync<string>(REFERRAL_AGENT_KEY) || '',
+    pendingTrackingId: uni.getStorageSync<string>(REFERRAL_TRACKING_KEY) || '',
     attributionId: uni.getStorageSync<string>(REFERRAL_ATTRIBUTION_KEY) || '',
     shareContext: null as ShareContext | null,
     performance: null as PromotionPerformance | null,
     loading: false,
   }),
   actions: {
-    async captureReferral(agentId?: string, couponId?: string) {
-      if (!agentId) return
-      this.pendingAgentId = agentId
-      uni.setStorageSync(REFERRAL_AGENT_KEY, agentId)
-      await this.ensureReferral(couponId)
+    stageReferral(referral: { agentId?: string; trackingId?: string }) {
+      if (referral.agentId) {
+        this.pendingAgentId = referral.agentId
+        uni.setStorageSync(REFERRAL_AGENT_KEY, referral.agentId)
+      }
+      if (referral.trackingId) {
+        this.pendingTrackingId = referral.trackingId
+        uni.setStorageSync(REFERRAL_TRACKING_KEY, referral.trackingId)
+      }
     },
     async ensureReferral(couponId?: string) {
-      if (!this.pendingAgentId || this.attributionId || !useAuthStore().isLoggedIn) return
+      if (
+        (!this.pendingAgentId && !this.pendingTrackingId) ||
+        this.attributionId ||
+        !useAuthStore().isLoggedIn
+      )
+        return
       try {
-        const result = await recordReferral(this.pendingAgentId, couponId)
+        const result = await recordReferral({
+          agentId: this.pendingAgentId || undefined,
+          trackingId: this.pendingTrackingId || undefined,
+          couponId,
+        })
         this.attributionId = result.attributionId
         uni.setStorageSync(REFERRAL_ATTRIBUTION_KEY, result.attributionId)
       } catch (error) {
@@ -43,7 +58,7 @@ export const usePromotionStore = defineStore('customer-promotion', {
     },
     async prepareShare(customerCouponId: string, platform: 'wechat_friend' | 'wechat_moment') {
       if (!useAuthStore().isLoggedIn) {
-        uni.navigateTo({ url: '/pages/login/index' })
+        void uni.navigateTo({ url: '/pages/login/index' })
         throw new Error('请先登录后再分享')
       }
       this.shareContext = await prepareCouponShare(customerCouponId, platform)
@@ -64,8 +79,10 @@ export const usePromotionStore = defineStore('customer-promotion', {
     },
     clearReferral() {
       this.pendingAgentId = ''
+      this.pendingTrackingId = ''
       this.attributionId = ''
       uni.removeStorageSync(REFERRAL_AGENT_KEY)
+      uni.removeStorageSync(REFERRAL_TRACKING_KEY)
       uni.removeStorageSync(REFERRAL_ATTRIBUTION_KEY)
     },
   },

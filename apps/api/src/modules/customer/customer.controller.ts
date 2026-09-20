@@ -4,6 +4,7 @@
 // ============================================================
 
 import {
+  BadRequestException,
   Controller,
   Get,
   Post,
@@ -213,6 +214,24 @@ export class CustomerController {
   // 社交分享与裂变（STORY-AI-019）
   // ========================
 
+  @Post('shares/referrals')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.CUSTOMER)
+  @ApiBearerAuth()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: '记录普通分享或达人内容落地归属（365 天首击锁定）' })
+  async recordContentReferral(@CurrentUser() user: { id: string }, @Body() dto: RecordReferralDto) {
+    if (!dto.agentId && !dto.trackingId) throw new BadRequestException('需提供分享员或内容追踪标识')
+    if (dto.agentId) await this.customerShareService.assertReferralIsNotSelf(user.id, dto.agentId)
+    return this.customerService.createAttribution({
+      customerId: user.id,
+      agentId: dto.agentId,
+      trackingId: dto.trackingId,
+      sourceType: 'share_link',
+      sourcePlatform: 'wechat',
+    })
+  }
+
   @Post('shares/:customerCouponId')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.CUSTOMER)
@@ -258,12 +277,13 @@ export class CustomerController {
   async recordReferral(
     @CurrentUser() user: { id: string },
     @Param('agentId') agentId: string,
-    @Body() _dto: RecordReferralDto,
+    @Body() dto: RecordReferralDto,
   ) {
     await this.customerShareService.assertReferralIsNotSelf(user.id, agentId)
     return this.customerService.createAttribution({
       customerId: user.id,
       agentId,
+      trackingId: dto.trackingId,
       sourceType: 'share_link',
       sourcePlatform: 'wechat',
     })

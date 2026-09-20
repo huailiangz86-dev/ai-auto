@@ -17,6 +17,7 @@ import { Redemption } from '../commission/entities/redemption.entity'
 import { SharingAgent } from '../agent/entities/sharing-agent.entity'
 import { Store } from '../merchant/entities/store.entity'
 import { AgentWallet } from '../agent/entities/agent-wallet.entity'
+import { CreatorTask } from '../task/entities/growth-task.entity'
 import { AuthModule } from '../auth/auth.module'
 import { ContentModule } from '../content/content.module'
 import { GamificationModule } from '../gamification/gamification.module'
@@ -46,6 +47,7 @@ import { CustomerCreationService } from './customer-creation.service'
       SharingAgent,
       Store,
       AgentWallet,
+      CreatorTask,
     ]),
   ],
   controllers: [CustomerController],

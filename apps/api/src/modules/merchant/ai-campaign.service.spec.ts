@@ -18,6 +18,7 @@ describe('AICampaignService', () => {
   beforeEach(async () => {
     aiBridge = {
       configureCampaign: jest.fn(),
+      generateMarketingProduct: jest.fn(),
     }
     campaignService = {
       createCampaign: jest.fn(),
@@ -38,6 +39,80 @@ describe('AICampaignService', () => {
 
   afterEach(() => {
     jest.clearAllMocks()
+  })
+
+  // ========================
+  // previewCampaign()
+  // ========================
+
+  describe('previewCampaign()', () => {
+    it('将 AI 返回的三套活动与优惠券方案转换为统一预览模型', async () => {
+      aiBridge.configureCampaign.mockResolvedValueOnce({
+        request_id: 'request-1',
+        parsed_intent: { activity_type: 'discount' },
+        options: [
+          {
+            option_id: 1,
+            campaign_type: 'DISCOUNT',
+            discount_amount: 20,
+            min_purchase: 100,
+            target_audience: '新客',
+            duration_days: 7,
+            budget: 10000,
+            description: '低门槛拉新',
+            confidence: 0.9,
+          },
+          {
+            option_id: 2,
+            campaign_type: 'CASH_REWARD',
+            cash_reward: 10,
+            target_audience: '新客',
+            duration_days: 7,
+            budget: 10000,
+            description: '现金激励',
+            confidence: 0.8,
+          },
+          {
+            option_id: 3,
+            campaign_type: 'COMBO',
+            discount_amount: 30,
+            min_purchase: 200,
+            target_audience: '全部人群',
+            duration_days: 14,
+            budget: 15000,
+            description: '套餐转化',
+            confidence: 0.7,
+          },
+        ],
+      })
+
+      const result = await service.previewCampaign('merchant-1', {
+        description: '中秋做一个拉新活动',
+      })
+
+      expect(result.source).toBe('ai')
+      expect(result.requestId).toBe('request-1')
+      expect(result.options).toHaveLength(3)
+      expect(result.options[0]).toMatchObject({
+        campaignType: CampaignType.DISCOUNT,
+        thresholdAmount: 100,
+        discountAmount: 20,
+        couponValidityDays: 7,
+        estimatedBudget: 10000,
+      })
+    })
+
+    it('AI 不可用时仍返回三套可审阅的降级方案', async () => {
+      aiBridge.configureCampaign.mockRejectedValueOnce(new Error('unavailable'))
+
+      const result = await service.previewCampaign('merchant-1', {
+        description: '做一个满100减20活动',
+      })
+
+      expect(result.source).toBe('fallback')
+      expect(result.options).toHaveLength(3)
+      expect(result.options[0].thresholdAmount).toBe(100)
+    })
   })
 
   // ========================
@@ -109,6 +184,15 @@ describe('AICampaignService', () => {
       expect(plan.title).toBe('限时折扣')
     })
 
+    it('支持 Markdown JSON 代码块解析', () => {
+      const plan = (service as any).parseAIResponse(
+        '```json\n{"plan_id":"plan-5","title":"代码块方案","campaign_type":"DISCOUNT"}\n```',
+      )
+
+      expect(plan.planId).toBe('plan-5')
+      expect(plan.title).toBe('代码块方案')
+    })
+
     it('纯文本非 JSON 时降级到默认', () => {
       const aiResult = '这是一段无法解析的描述文本'
 
@@ -164,6 +248,24 @@ describe('AICampaignService', () => {
       const plan = (service as any).buildDefaultPlan('做一个组合套餐优惠')
 
       expect(plan.campaignType).toBe(CampaignType.COMBO)
+    })
+
+    it('从套餐描述中识别套餐价、原价和活动日期', () => {
+      const plan = (service as any).buildDefaultPlan(
+        '我想做一个活动在中秋节，一个28元的套餐优惠活动，原价是56元，时间从9月13日到9月21日',
+      )
+
+      expect(plan).toMatchObject({
+        campaignType: CampaignType.COMBO,
+        offerPrice: 28,
+        originalPrice: 56,
+        discountAmount: 28,
+        couponValidityDays: 9,
+      })
+      expect(new Date(plan.startAt).getMonth()).toBe(8)
+      expect(new Date(plan.startAt).getDate()).toBe(13)
+      expect(new Date(plan.endAt).getMonth()).toBe(8)
+      expect(new Date(plan.endAt).getDate()).toBe(21)
     })
 
     it('识别满减金额', () => {
@@ -296,6 +398,156 @@ describe('AICampaignService', () => {
       await service.createCampaignFromDescription('merchant-1', {
         description: '活动',
       })
+    })
+
+    it('确认预览方案时创建草稿且不绕过测量预登记直接发布', async () => {
+      campaignService.createCampaign.mockResolvedValueOnce({ campaignId: 'campaign-draft' })
+      campaignService.createCoupon.mockResolvedValueOnce({
+        couponId: 'coupon-draft',
+        couponCode: 'CPN-DRAFT',
+      })
+
+      const result = await service.createCampaignFromDescription('merchant-1', {
+        description: '做一个拉新活动',
+        autoPublish: false,
+        selectedOption: {
+          optionId: 2,
+          title: '均衡拉新方案',
+          campaignType: 'discount',
+          targetAudience: '新客',
+          thresholdAmount: 100,
+          discountAmount: 20,
+          agentRewardAmount: 5,
+          couponValidityDays: 7,
+        },
+      })
+
+      expect(result.campaignStatus).toBe('draft')
+      expect(campaignService.publishCampaign).not.toHaveBeenCalled()
+      expect(campaignService.createCoupon).toHaveBeenCalledWith(
+        'merchant-1',
+        'campaign-draft',
+        expect.objectContaining({ thresholdAmount: 100, discountAmount: 20 }),
+      )
+    })
+
+    it('达人内容任务创建内容执行活动与活动转化优惠券', async () => {
+      aiBridge.configureCampaign.mockResolvedValueOnce({
+        options: [
+          {
+            option_id: 1,
+            task_type: 'creator_content',
+            campaign_type: 'DISCOUNT',
+            target_audience: '本地美食兴趣人群',
+            duration_days: 7,
+            budget: 10000,
+            content_brief: '发布门店探店图文并通过专属链接引导到店',
+            content_types: ['graphic'],
+            channels: ['xiaohongshu'],
+            call_to_action: '点击专属链接到店',
+            description: '内容引流',
+            confidence: 0.9,
+          },
+        ],
+      })
+      campaignService.createCampaign.mockResolvedValueOnce({ campaignId: 'campaign-creator' })
+      campaignService.createCoupon.mockResolvedValueOnce({
+        couponId: 'coupon-creator',
+        couponCode: 'CPN-CREATOR',
+      })
+
+      const result = await service.createCampaignFromDescription('merchant-1', {
+        description: '请找达人发布探店图文，完成内容引流',
+        autoPublish: false,
+      })
+
+      expect(result).toMatchObject({
+        campaignId: 'campaign-creator',
+        couponId: 'coupon-creator',
+        taskType: 'creator_content',
+        campaignStatus: 'draft',
+      })
+      expect(campaignService.createCampaign).toHaveBeenCalledWith(
+        'merchant-1',
+        expect.objectContaining({ purpose: 'creator_content' }),
+      )
+      expect(campaignService.createCoupon).toHaveBeenCalledWith(
+        'merchant-1',
+        'campaign-creator',
+        expect.objectContaining({ agentRewardAmount: expect.any(Number) }),
+      )
+    })
+
+    it('创建组合套餐时沿用套餐价和明确的活动时间', async () => {
+      campaignService.createCampaign.mockResolvedValueOnce({ campaignId: 'campaign-combo' })
+      campaignService.createCoupon.mockResolvedValueOnce({
+        couponId: 'coupon-combo',
+        couponCode: 'CPN-COMBO',
+      })
+
+      await service.createCampaignFromDescription('merchant-1', {
+        description: '中秋 28 元套餐，原价 56 元，9 月 13 日至 9 月 21 日',
+        autoPublish: false,
+        selectedOption: {
+          title: '中秋套餐优惠',
+          campaignType: 'combo',
+          offerPrice: 28,
+          originalPrice: 56,
+          startAt: '2026-09-13T00:00:00.000Z',
+          endAt: '2026-09-21T23:59:59.999Z',
+          agentRewardAmount: 5,
+        },
+      })
+
+      expect(campaignService.createCampaign).toHaveBeenCalledWith(
+        'merchant-1',
+        expect.objectContaining({
+          campaignType: CampaignType.COMBO,
+          startAt: '2026-09-13T00:00:00.000Z',
+          endAt: '2026-09-21T23:59:59.999Z',
+        }),
+      )
+      expect(campaignService.createCoupon).toHaveBeenCalledWith(
+        'merchant-1',
+        'campaign-combo',
+        expect.objectContaining({
+          discountAmount: 28,
+          validFrom: '2026-09-13T00:00:00.000Z',
+          validUntil: '2026-09-21T23:59:59.999Z',
+        }),
+      )
+    })
+  })
+
+  describe('generateMarketingProduct()', () => {
+    it('将 AI 商品草稿转换为保存接口使用的 camelCase 结构', async () => {
+      aiBridge.generateMarketingProduct.mockResolvedValueOnce({
+        request_id: 'product-request-1',
+        product: {
+          product_name: '双人套餐券',
+          category: '团购套餐券',
+          description: '适合两人到店使用',
+          skus: [
+            {
+              sku_name: '默认规格',
+              sku_code: 'SET-2P',
+              spec: '双人',
+              price: 198,
+              market_price: 298,
+              attributes: { people: '2' },
+            },
+          ],
+        },
+        usage: { model: 'test' },
+      })
+
+      const result = await service.generateMarketingProduct('merchant-1', {
+        prompt: '生成双人套餐券，售价198，原价298',
+      })
+
+      expect(result.requestId).toBe('product-request-1')
+      expect(result.product).toMatchObject({ productName: '双人套餐券', category: '团购套餐券' })
+      expect(result.product.skus[0]).toMatchObject({ skuName: '默认规格', price: 198 })
     })
   })
 })

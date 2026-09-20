@@ -10,13 +10,11 @@ import { InjectRepository } from '@nestjs/typeorm'
 import { Buffer } from 'node:buffer'
 import { createDecipheriv, createSign, createVerify, randomBytes, randomUUID } from 'crypto'
 import { DataSource, Repository } from 'typeorm'
-import { SubscriptionStatus } from '@ai-auto/shared'
+import { WalletTransactionType } from '@ai-auto/shared'
+import { CommissionBudget, BudgetTransaction } from './entities/commission-budget.entity'
 import { Merchant } from './entities/merchant.entity'
-import { Subscription } from './entities/subscription.entity'
-import {
-  SubscriptionPaymentOrder,
-  SubscriptionPaymentProvider,
-} from './entities/subscription-payment-order.entity'
+import { WalletPaymentOrder, WalletPaymentProvider } from './entities/wallet-payment-order.entity'
+import { CreateWalletTopupDto } from './dto/wallet-payment.dto'
 
 const WECHAT_NATIVE_PATH = '/v3/pay/transactions/native'
 const WECHAT_API_BASE = 'https://api.mch.weixin.qq.com'
@@ -24,73 +22,79 @@ const ALIPAY_GATEWAY = 'https://openapi.alipay.com/gateway.do'
 const ALIPAY_SANDBOX_GATEWAY = 'https://openapi-sandbox.dl.alipaydev.com/gateway.do'
 const ORDER_TTL_MS = 15 * 60 * 1000
 
-export interface Checkout {
+export interface WalletCheckout {
   orderNo: string
   expiresAt: Date
-  provider: SubscriptionPaymentProvider
+  provider: WalletPaymentProvider
   payUrl?: string
   codeUrl?: string
 }
 
 @Injectable()
-export class SubscriptionPaymentService {
-  private readonly logger = new Logger(SubscriptionPaymentService.name)
+export class WalletPaymentService {
+  private readonly logger = new Logger(WalletPaymentService.name)
+  private readonly wechatPlatformCertificates = new Map<
+    string,
+    { certificate: string; expiresAt: number }
+  >()
 
   constructor(
-    @InjectRepository(SubscriptionPaymentOrder)
-    private readonly orders: Repository<SubscriptionPaymentOrder>,
+    @InjectRepository(WalletPaymentOrder)
+    private readonly orders: Repository<WalletPaymentOrder>,
     @InjectRepository(Merchant) private readonly merchants: Repository<Merchant>,
+    @InjectRepository(CommissionBudget)
+    private readonly budgets: Repository<CommissionBudget>,
     private readonly dataSource: DataSource,
     private readonly config: ConfigService,
   ) {}
 
-  async createCheckout(
-    merchantId: string,
-    provider: SubscriptionPaymentProvider,
-    planMonths: 1 | 12,
-  ): Promise<Checkout> {
+  async createCheckout(merchantId: string, dto: CreateWalletTopupDto): Promise<WalletCheckout> {
     const merchant = await this.merchants.findOne({
       where: { id: merchantId },
       select: ['id', 'businessName'],
     })
     if (!merchant) throw new NotFoundException({ code: 2002, message: '商户不存在' })
 
-    const amount = planMonths === 12 ? 3600 : 300
     const order = await this.orders.save(
       this.orders.create({
         merchantId,
         outTradeNo: this.createOrderNo(),
-        provider,
-        planMonths,
-        amount,
+        provider: dto.provider,
+        amount: this.roundMoney(dto.amount),
         status: 'pending',
         expiresAt: new Date(Date.now() + ORDER_TTL_MS),
       }),
     )
-    const subject = `${merchant.businessName} AI auto ${planMonths === 12 ? '年度' : '月度'}订阅`
+    const subject = `${merchant.businessName} AI auto 佣金预算充值`
 
     try {
       const checkout =
-        provider === 'wechatpay'
+        dto.provider === 'wechatpay'
           ? await this.createWechatNative(order, subject)
           : this.createAlipayPage(order, subject)
-      return { ...checkout, orderNo: order.outTradeNo, expiresAt: order.expiresAt, provider }
+      return {
+        ...checkout,
+        orderNo: order.outTradeNo,
+        expiresAt: order.expiresAt,
+        provider: dto.provider,
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : '支付渠道暂不可用'
       await this.orders.update(order.id, { status: 'failed', failureReason: message })
       this.logger.error({
-        event: 'subscription_checkout_failed',
-        provider,
+        event: 'wallet_checkout_failed',
+        merchantId,
+        provider: dto.provider,
         orderNo: order.outTradeNo,
         message,
       })
-      throw new ServiceUnavailableException('支付渠道暂不可用，请稍后重试')
+      throw new ServiceUnavailableException('支付渠道暂不可用，请配置支付参数后重试')
     }
   }
 
   async getOrder(merchantId: string, orderNo: string) {
     const order = await this.orders.findOne({ where: { merchantId, outTradeNo: orderNo } })
-    if (!order) throw new NotFoundException({ code: 2002, message: '支付订单不存在' })
+    if (!order) throw new NotFoundException({ code: 8003, message: '充值支付订单不存在' })
     if (order.status === 'pending' && order.expiresAt.getTime() <= Date.now()) {
       order.status = 'closed'
       await this.orders.save(order)
@@ -124,11 +128,18 @@ export class SubscriptionPaymentService {
     const timestamp = this.header(headers, 'wechatpay-timestamp')
     const nonce = this.header(headers, 'wechatpay-nonce')
     const signature = this.header(headers, 'wechatpay-signature')
+    const serial = this.header(headers, 'wechatpay-serial')
     if (
       !timestamp ||
       !nonce ||
       !signature ||
-      !this.verifyWechatSignature(timestamp, nonce, rawBody.toString('utf8'), signature)
+      !(await this.verifyWechatSignature(
+        timestamp,
+        nonce,
+        rawBody.toString('utf8'),
+        signature,
+        serial,
+      ))
     )
       return false
     let payload: any
@@ -160,65 +171,73 @@ export class SubscriptionPaymentService {
 
   private async fulfill(
     orderNo: string,
-    provider: SubscriptionPaymentProvider,
+    provider: WalletPaymentProvider,
     providerTransactionId: string,
   ) {
     await this.dataSource.transaction(async (manager) => {
-      const order = await manager.findOne(SubscriptionPaymentOrder, {
+      const order = await manager.findOne(WalletPaymentOrder, {
         where: { outTradeNo: orderNo, provider },
         lock: { mode: 'pessimistic_write' },
       })
-      if (!order) throw new NotFoundException('支付订单不存在')
+      if (!order) throw new NotFoundException('充值支付订单不存在')
       if (order.status === 'paid') return
       if (order.status !== 'pending' || order.expiresAt.getTime() <= Date.now())
-        throw new BadRequestException('支付订单已失效')
-      const merchant = await manager.findOne(Merchant, {
-        where: { id: order.merchantId },
+        throw new BadRequestException('充值支付订单已失效')
+
+      let budget = await manager.findOne(CommissionBudget, {
+        where: { merchantId: order.merchantId },
         lock: { mode: 'pessimistic_write' },
       })
-      if (!merchant) throw new NotFoundException('商户不存在')
-      const active = await manager.findOne(Subscription, {
-        where: { merchantId: merchant.id, status: SubscriptionStatus.ACTIVE },
-        order: { expireAt: 'DESC' },
-        lock: { mode: 'pessimistic_write' },
+      if (!budget) {
+        budget = await manager.save(
+          CommissionBudget,
+          manager.create(CommissionBudget, {
+            merchantId: order.merchantId,
+            totalBalance: 0,
+            availableBalance: 0,
+            frozenBalance: 0,
+            totalSpent: 0,
+            totalTopup: 0,
+            status: true,
+            lowBalanceThreshold: 100,
+          }),
+        )
+      }
+      const amount = Number(order.amount)
+      const balanceBefore = Number(budget.totalBalance)
+      const balanceAfter = this.roundMoney(balanceBefore + amount)
+      await manager.update(CommissionBudget, budget.id, {
+        totalBalance: balanceAfter,
+        availableBalance: this.roundMoney(Number(budget.availableBalance) + amount),
+        totalTopup: this.roundMoney(Number(budget.totalTopup) + amount),
       })
-      const now = new Date()
-      const startAt = active?.expireAt && active.expireAt > now ? active.expireAt : now
-      const expireAt = new Date(startAt)
-      expireAt.setMonth(expireAt.getMonth() + order.planMonths)
-      merchant.subscriptionStatus = SubscriptionStatus.ACTIVE
-      await manager.save(merchant)
       await manager.save(
-        Subscription,
-        manager.create(Subscription, {
-          merchantId: merchant.id,
-          planName: order.planMonths === 12 ? 'annual' : 'monthly',
-          status: SubscriptionStatus.ACTIVE,
-          startAt,
-          expireAt,
-          amountPaid: order.amount,
-          paymentMethod: provider,
-          paymentTransactionId: providerTransactionId,
+        BudgetTransaction,
+        manager.create(BudgetTransaction, {
+          budgetId: budget.id,
+          type: WalletTransactionType.RECHARGE,
+          amount,
+          balanceBefore,
+          balanceAfter,
+          description: `支付订单 ${order.outTradeNo} 充值 ${amount.toFixed(2)} 元`,
         }),
       )
       order.status = 'paid'
-      order.paidAt = now
+      order.paidAt = new Date()
       order.providerTransactionId = providerTransactionId
-      await manager.save(order)
+      await manager.save(WalletPaymentOrder, order)
     })
+    this.logger.log({ event: 'wallet_topup_paid', orderNo, provider })
   }
 
-  private async createWechatNative(
-    order: SubscriptionPaymentOrder,
-    description: string,
-  ): Promise<Pick<Checkout, 'codeUrl'>> {
+  private async createWechatNative(order: WalletPaymentOrder, subject: string) {
     const mchid = this.required('payment.wechatpayMchId')
     const appid = this.required('payment.wechatpayAppId')
-    const notifyUrl = this.required('payment.wechatpayNotifyUrl')
+    const notifyUrl = this.required('payment.wechatpayWalletNotifyUrl')
     const body = JSON.stringify({
       appid,
       mchid,
-      description: description.slice(0, 127),
+      description: subject.slice(0, 127),
       out_trade_no: order.outTradeNo,
       notify_url: notifyUrl,
       time_expire: order.expiresAt.toISOString(),
@@ -242,10 +261,7 @@ export class SubscriptionPaymentService {
     return { codeUrl: result.code_url }
   }
 
-  private createAlipayPage(
-    order: SubscriptionPaymentOrder,
-    subject: string,
-  ): Pick<Checkout, 'payUrl'> {
+  private createAlipayPage(order: WalletPaymentOrder, subject: string) {
     const params: Record<string, string> = {
       app_id: this.required('payment.alipayAppId'),
       method: 'alipay.trade.page.pay',
@@ -254,7 +270,7 @@ export class SubscriptionPaymentService {
       sign_type: 'RSA2',
       timestamp: this.alipayTimestamp(),
       version: '1.0',
-      notify_url: this.required('payment.alipayNotifyUrl'),
+      notify_url: this.required('payment.alipayWalletNotifyUrl'),
       biz_content: JSON.stringify({
         out_trade_no: order.outTradeNo,
         total_amount: Number(order.amount).toFixed(2),
@@ -282,14 +298,69 @@ export class SubscriptionPaymentService {
     return `WECHATPAY2-SHA256-RSA2048 mchid="${this.required('payment.wechatpayMchId')}",nonce_str="${nonce}",signature="${signature}",timestamp="${timestamp}",serial_no="${this.required('payment.wechatpaySerialNo')}"`
   }
 
-  private verifyWechatSignature(timestamp: string, nonce: string, body: string, signature: string) {
+  private async verifyWechatSignature(
+    timestamp: string,
+    nonce: string,
+    body: string,
+    signature: string,
+    serial?: string,
+  ) {
+    let certificate = this.config.get<string>('payment.wechatpayPlatformCertificate')
+    if (!certificate) certificate = await this.fetchWechatPlatformCertificate(serial)
+    if (!certificate) return false
     const verifier = createVerify('RSA-SHA256')
     verifier.update(`${timestamp}\n${nonce}\n${body}\n`)
-    return verifier.verify(
-      this.required('payment.wechatpayPlatformCertificate'),
-      signature,
-      'base64',
-    )
+    return verifier.verify(certificate, signature, 'base64')
+  }
+
+  private async fetchWechatPlatformCertificate(serial?: string) {
+    if (serial) {
+      const cached = this.wechatPlatformCertificates.get(serial)
+      if (cached && cached.expiresAt > Date.now()) return cached.certificate
+    }
+
+    try {
+      const path = '/v3/certificates'
+      const response = await globalThis.fetch(`${WECHAT_API_BASE}${path}`, {
+        headers: {
+          Authorization: this.wechatAuthorization('GET', path, ''),
+          Accept: 'application/json',
+        },
+      })
+      if (!response.ok) return ''
+      const payload = (await response.json()) as {
+        data?: {
+          serial_no?: string
+          expire_time?: string
+          encrypt_certificate?: {
+            nonce: string
+            ciphertext: string
+            associated_data?: string
+          }
+        }[]
+      }
+      for (const item of payload.data ?? []) {
+        if (serial && item.serial_no !== serial) continue
+        if (!item.serial_no || !item.encrypt_certificate) continue
+        const decrypted = this.decryptWechatResource(item.encrypt_certificate)
+        if (typeof decrypted?.certificate !== 'string') continue
+        const expiresAt = Math.max(
+          Date.now() + 5 * 60 * 1000,
+          new Date(item.expire_time ?? '').getTime() - 5 * 60 * 1000,
+        )
+        this.wechatPlatformCertificates.set(item.serial_no, {
+          certificate: decrypted.certificate,
+          expiresAt,
+        })
+        return decrypted.certificate
+      }
+    } catch (error) {
+      this.logger.warn({
+        event: 'wechat_platform_certificate_fetch_failed',
+        message: error instanceof Error ? error.message : 'unknown error',
+      })
+    }
+    return ''
   }
 
   private decryptWechatResource(resource: {
@@ -312,7 +383,7 @@ export class SubscriptionPaymentService {
 
   private alipaySign(params: Record<string, string>) {
     const signer = createSign('RSA-SHA256')
-    signer.update(this.alipayContent(params, false), 'utf8')
+    signer.update(this.alipayContent(params), 'utf8')
     return signer.sign(this.required('payment.alipayPrivateKey'), 'base64')
   }
 
@@ -323,7 +394,7 @@ export class SubscriptionPaymentService {
     return verifier.verify(this.required('payment.alipayPublicKey'), params.sign, 'base64')
   }
 
-  private alipayContent(params: Record<string, string>, notification: boolean) {
+  private alipayContent(params: Record<string, string>, notification = false) {
     return Object.keys(params)
       .filter(
         (key) =>
@@ -336,28 +407,38 @@ export class SubscriptionPaymentService {
       .map((key) => `${key}=${params[key]}`)
       .join('&')
   }
+
   private required(key: string) {
     const value = this.config.get<string>(key)
     if (!value) throw new Error(`${key} 未配置`)
     return value.replace(/\\n/g, '\n')
   }
+
   private createOrderNo() {
-    return `AA${new Date().toISOString().replace(/\D/g, '').slice(0, 14)}${randomUUID().replace(/-/g, '').slice(0, 8).toUpperCase()}`
+    return `WA${new Date().toISOString().replace(/\D/g, '').slice(0, 14)}${randomUUID().replace(/-/g, '').slice(0, 8).toUpperCase()}`
   }
+
   private alipayTimestamp() {
-    const d = new Date()
-    const p = (value: number) => String(value).padStart(2, '0')
-    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
+    const date = new Date()
+    const pad = (value: number) => String(value).padStart(2, '0')
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
   }
+
   private amountMatches(expected: number, actual?: string) {
     return (
       actual !== undefined &&
       Math.round(Number(expected) * 100) === Math.round(Number(actual) * 100)
     )
   }
+
   private toCents(value: number) {
     return Math.round(Number(value) * 100)
   }
+
+  private roundMoney(value: number) {
+    return Math.round(value * 100) / 100
+  }
+
   private header(headers: Record<string, string | string[] | undefined>, key: string) {
     const value = headers[key] ?? headers[key.toLowerCase()]
     return Array.isArray(value) ? value[0] : value

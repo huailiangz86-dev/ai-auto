@@ -19,6 +19,7 @@ import { SharingAgent } from '../agent/entities/sharing-agent.entity'
 import { Store } from '../merchant/entities/store.entity'
 import { CouponStatus } from '@ai-auto/shared'
 import { SharingTaskService } from '../task/sharing-task.service'
+import { CreatorTask } from '../task/entities/growth-task.entity'
 
 import {
   CreateAttributionDto,
@@ -57,6 +58,8 @@ export class CustomerService {
     private readonly storeRepo: Repository<Store>,
     @InjectRepository(Redemption)
     private readonly redemptionRepo: Repository<Redemption>,
+    @InjectRepository(CreatorTask)
+    private readonly creatorTaskRepo: Repository<CreatorTask>,
     private readonly dataSource: DataSource,
     private readonly taskService: SharingTaskService,
   ) {}
@@ -76,12 +79,17 @@ export class CustomerService {
       customerId,
       agentId,
       campaignId,
+      trackingId,
       sourceType,
       sourcePlatform,
       clickIp,
       clickDeviceId,
       clickUserAgent,
     } = dto
+
+    const trackedTask = await this.resolveCreatorTracking(trackingId, agentId, campaignId)
+    const resolvedAgentId = trackedTask?.creatorId ?? agentId
+    const resolvedCampaignId = trackedTask?.campaignId ?? campaignId ?? null
 
     // 验证客户存在
     const customer = await this.customerRepo.findOne({ where: { id: customerId } })
@@ -90,11 +98,13 @@ export class CustomerService {
     }
 
     // 如果没有 agentId，记录匿名归属（只追踪渠道）
-    if (!agentId) {
+    if (!resolvedAgentId) {
       const attr = this.attributionRepo.create({
         customerId,
         agentId: '',
-        campaignId: campaignId ?? null,
+        campaignId: resolvedCampaignId,
+        creatorTaskId: trackedTask?.id ?? null,
+        trackingId: trackedTask?.trackingId ?? null,
         sourceType,
         sourcePlatform: sourcePlatform ?? null,
         clickIp: clickIp ?? null,
@@ -111,9 +121,12 @@ export class CustomerService {
     }
 
     // 验证分享员存在
-    const agent = await this.agentRepo.findOne({ where: { id: agentId } })
+    const agent = await this.agentRepo.findOne({ where: { id: resolvedAgentId } })
     if (!agent) {
       throw new NotFoundException({ code: 3001, message: '分享员不存在' })
+    }
+    if (customer.phone && agent.phone && customer.phone === agent.phone) {
+      throw new BadRequestException({ code: 3005, message: '不能记录自己的分享归属' })
     }
 
     const now = new Date()
@@ -125,7 +138,7 @@ export class CustomerService {
 
     if (existingActive) {
       // 已有关联：检查是否为同一分享员
-      if (existingActive.agentId === agentId) {
+      if (existingActive.agentId === resolvedAgentId) {
         // 同一分享员重复点击，刷新点击时间但不重置锁定期
         existingActive.clickIp = clickIp ?? existingActive.clickIp
         existingActive.clickDeviceId = clickDeviceId ?? existingActive.clickDeviceId
@@ -144,8 +157,10 @@ export class CustomerService {
 
     if (expiredAttribution) {
       // 重新激活过期归属
-      expiredAttribution.agentId = agentId
-      expiredAttribution.campaignId = campaignId ?? null
+      expiredAttribution.agentId = resolvedAgentId
+      expiredAttribution.campaignId = resolvedCampaignId
+      expiredAttribution.creatorTaskId = trackedTask?.id ?? null
+      expiredAttribution.trackingId = trackedTask?.trackingId ?? null
       expiredAttribution.sourceType = sourceType
       expiredAttribution.sourcePlatform = sourcePlatform ?? null
       expiredAttribution.clickIp = clickIp ?? null
@@ -160,7 +175,7 @@ export class CustomerService {
       await this.attributionRepo.save(expiredAttribution)
 
       // 更新客户的 firstAgentId
-      customer.firstAgentId = agentId
+      customer.firstAgentId = resolvedAgentId
       await this.customerRepo.save(customer)
 
       return { attributionId: expiredAttribution.id, isNewLock: true }
@@ -169,8 +184,10 @@ export class CustomerService {
     // 全新归属
     const attr = this.attributionRepo.create({
       customerId,
-      agentId,
-      campaignId: campaignId ?? null,
+      agentId: resolvedAgentId,
+      campaignId: resolvedCampaignId,
+      creatorTaskId: trackedTask?.id ?? null,
+      trackingId: trackedTask?.trackingId ?? null,
       sourceType,
       sourcePlatform: sourcePlatform ?? null,
       clickIp: clickIp ?? null,
@@ -185,13 +202,13 @@ export class CustomerService {
     await this.attributionRepo.save(attr)
 
     // 更新客户
-    customer.firstAgentId = agentId
+    customer.firstAgentId = resolvedAgentId
     await this.customerRepo.save(customer)
 
     this.logger.log({
       event: 'attribution_locked',
       customerId,
-      agentId,
+      agentId: resolvedAgentId,
       attributionId: attr.id,
       lockExpiresAt: attr.lockExpiredAt,
     })
@@ -220,6 +237,8 @@ export class CustomerService {
       agentId: attr.agentId,
       agentName: attr.agent?.nickname ?? null,
       campaignId: attr.campaignId,
+      creatorTaskId: attr.creatorTaskId ?? null,
+      trackingId: attr.trackingId ?? null,
       sourceType: attr.sourceType,
       sourcePlatform: attr.sourcePlatform,
       lockStartedAt: attr.lockStartedAt,
@@ -233,6 +252,25 @@ export class CustomerService {
       totalRedemptions: attr.totalRedemptions,
       totalCommission: Number(attr.totalCommission),
     }
+  }
+
+  /** Resolve only active, creator-owned task links; the client never supplies a task ID directly. */
+  private async resolveCreatorTracking(
+    trackingId?: string,
+    agentId?: string,
+    campaignId?: string,
+  ): Promise<CreatorTask | null> {
+    if (!trackingId) return null
+    const task = await this.creatorTaskRepo.findOne({ where: { trackingId } })
+    if (!task || !task.trackingId)
+      throw new BadRequestException({ code: 5010, message: '内容追踪链接无效' })
+    if (!['published', 'tracking', 'completed', 'settled'].includes(task.status))
+      throw new BadRequestException({ code: 5011, message: '内容尚未发布，不能建立引流归因' })
+    if (agentId && task.creatorId !== agentId)
+      throw new BadRequestException({ code: 5012, message: '追踪链接与分享员不一致' })
+    if (campaignId && task.campaignId !== campaignId)
+      throw new BadRequestException({ code: 5013, message: '追踪链接与活动不一致' })
+    return task
   }
 
   /**
@@ -450,18 +488,51 @@ export class CustomerService {
       ? await this.redemptionRepo.findOne({ where: { id: coupon.redemptionId, customerId } })
       : null
     const events = [
-      { type: 'coupon_claimed', occurredAt: coupon.claimedAt, status: 'recorded', label: '优惠券已领取' },
+      {
+        type: 'coupon_claimed',
+        occurredAt: coupon.claimedAt,
+        status: 'recorded',
+        label: '优惠券已领取',
+      },
       ...(coupon.trackingConsentedAt
-        ? [{ type: 'tracking_consented', occurredAt: coupon.trackingConsentedAt, status: 'recorded', label: '已同意来源追踪' }]
+        ? [
+            {
+              type: 'tracking_consented',
+              occurredAt: coupon.trackingConsentedAt,
+              status: 'recorded',
+              label: '已同意来源追踪',
+            },
+          ]
         : []),
       ...(coupon.trackingConsentRevokedAt
-        ? [{ type: 'tracking_revoked', occurredAt: coupon.trackingConsentRevokedAt, status: 'recorded', label: '已停止后续来源追踪' }]
+        ? [
+            {
+              type: 'tracking_revoked',
+              occurredAt: coupon.trackingConsentRevokedAt,
+              status: 'recorded',
+              label: '已停止后续来源追踪',
+            },
+          ]
         : []),
       ...(redemption?.presentedAt
-        ? [{ type: 'coupon_presented', occurredAt: redemption.presentedAt, status: 'recorded', label: '已向商家出示' }]
+        ? [
+            {
+              type: 'coupon_presented',
+              occurredAt: redemption.presentedAt,
+              status: 'recorded',
+              label: '已向商家出示',
+            },
+          ]
         : []),
       ...(redemption?.verifiedAt
-        ? [{ type: 'redemption_verified', occurredAt: redemption.verifiedAt, status: 'verified', label: '核销已验证' }]
+        ? [
+            {
+              type: 'redemption_verified',
+              occurredAt: redemption.verifiedAt,
+              status: 'verified',
+              label: '核销已验证',
+            },
+          ]
         : []),
     ]
     return {
@@ -472,7 +543,8 @@ export class CustomerService {
         consentVersion: coupon.trackingConsentVersion ?? null,
         consentedAt: coupon.trackingConsentedAt ?? null,
         revokedAt: coupon.trackingConsentRevokedAt ?? null,
-        notice: '来源追踪仅用于核对内容带来的核销与创作者报酬，不会向创作者展示你的身份或联系方式。',
+        notice:
+          '来源追踪仅用于核对内容带来的核销与创作者报酬，不会向创作者展示你的身份或联系方式。',
       },
       traceability: {
         attributionLinked: Boolean(coupon.attributionId && coupon.trackingConsent),

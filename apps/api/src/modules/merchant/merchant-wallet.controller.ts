@@ -4,11 +4,11 @@
 // ============================================================
 
 import {
+  BadRequestException,
   Controller,
   Get,
   Post,
   Body,
-  Param,
   Query,
   UseGuards,
   HttpCode,
@@ -22,19 +22,18 @@ import { Roles } from '../auth/decorators/roles.decorator'
 import { UserRole } from '@ai-auto/shared'
 
 import { MerchantWalletService } from './merchant-wallet.service'
-import {
-  TopupBudgetDto,
-  FreezeBudgetDto,
-  UnfreezeBudgetDto,
-  ListTransactionsDto,
-} from './dto/wallet.dto'
+import { WalletPaymentService } from './wallet-payment.service'
+import { TopupBudgetDto, FreezeBudgetDto, ListTransactionsDto } from './dto/wallet.dto'
 
 @ApiTags('商家钱包 API')
 @Controller('merchant/wallet')
 @UseGuards(JwtAuthGuard)
 @ApiBearerAuth()
 export class MerchantWalletController {
-  constructor(private readonly walletService: MerchantWalletService) {}
+  constructor(
+    private readonly walletService: MerchantWalletService,
+    private readonly walletPaymentService: WalletPaymentService,
+  ) {}
 
   // ========================
   // 钱包查询
@@ -53,10 +52,19 @@ export class MerchantWalletController {
 
   @Post('topup')
   @Roles(UserRole.MERCHANT_ADMIN)
-  @ApiOperation({ summary: '充值佣金预算' })
-  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: '兼容旧入口：创建佣金预算充值支付订单' })
+  @HttpCode(HttpStatus.OK)
   async topupBudget(@CurrentUser() user: { merchantId: string }, @Body() dto: TopupBudgetDto) {
-    return this.walletService.topupBudget(user.merchantId, dto)
+    if (dto.method !== 'alipay' && dto.method !== 'wechatpay') {
+      throw new BadRequestException('请使用支付宝或微信支付充值')
+    }
+
+    // Keep the legacy route for existing dashboard builds, but route it through
+    // the payment-order flow so this endpoint can never credit the wallet directly.
+    return this.walletPaymentService.createCheckout(user.merchantId, {
+      amount: dto.amount,
+      provider: dto.method,
+    })
   }
 
   // ========================

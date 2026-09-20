@@ -52,12 +52,15 @@ export interface AppConfig {
     alipayPrivateKey: string
     alipayPublicKey: string
     alipayNotifyUrl: string
+    alipayWalletNotifyUrl: string
     alipayReturnUrl: string
+    alipaySandbox: boolean
     wechatpayAppId: string
     wechatpaySerialNo: string
     wechatpayPrivateKey: string
     wechatpayApiV3Key: string
     wechatpayNotifyUrl: string
+    wechatpayWalletNotifyUrl: string
     wechatpayPlatformCertificate: string
   }
   wechat: {
@@ -72,6 +75,47 @@ export interface AppConfig {
   }
 }
 
+function loadExternalEnvFile(path?: string): Record<string, string> {
+  if (!path) return {}
+  try {
+    return Object.fromEntries(
+      readFileSync(path, 'utf8')
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => line && !line.startsWith('#') && line.includes('='))
+        .map((line) => {
+          const separator = line.indexOf('=')
+          const key = line.slice(0, separator).trim()
+          let value = line.slice(separator + 1).trim()
+          if (
+            (value.startsWith('"') && value.endsWith('"')) ||
+            (value.startsWith("'") && value.endsWith("'"))
+          ) {
+            value = value.slice(1, -1)
+          }
+          return [key, value]
+        }),
+    )
+  } catch {
+    return {}
+  }
+}
+
+function pem(value: string, label: 'PRIVATE KEY' | 'PUBLIC KEY' | 'CERTIFICATE') {
+  const normalized = value.trim().replace(/\\n/g, '\n')
+  if (!normalized || normalized.includes('BEGIN ')) return normalized
+  return `-----BEGIN ${label}-----\n${normalized.replace(/\s+/g, '')}\n-----END ${label}-----`
+}
+
+function urlOrigin(value?: string) {
+  if (!value) return ''
+  try {
+    return new URL(value).origin
+  } catch {
+    return ''
+  }
+}
+
 export default (): AppConfig => {
   const env = process.env.NODE_ENV || 'development'
   const configPath = join(process.cwd(), `config.${env}.yaml`)
@@ -79,10 +123,32 @@ export default (): AppConfig => {
   let fileConfig: Partial<AppConfig> = {}
   try {
     const file = readFileSync(configPath, 'utf8')
-    fileConfig = yaml.load(file) as Partial<AppConfig>
+    fileConfig = yaml.load(file)
   } catch {
     // No yaml config, use env vars only
   }
+
+  const externalEnv = loadExternalEnvFile(process.env.AI_AUTO_PAYMENT_ENV_FILE)
+  const external = (key: string, ...aliases: string[]) =>
+    process.env[key] ||
+    externalEnv[key] ||
+    aliases.map((alias) => process.env[alias] || externalEnv[alias]).find(Boolean) ||
+    ''
+  const externalCallbackOrigin = urlOrigin(
+    externalEnv.AI_AUTO_PUBLIC_BASE_URL ||
+      externalEnv.ALIPAY_NOTIFY_URL ||
+      externalEnv.WECHAT_PAY_NOTIFY_URL,
+  )
+  const callbackOrigin = (external('AI_AUTO_PUBLIC_BASE_URL') || externalCallbackOrigin).replace(
+    /\/$/,
+    '',
+  )
+  const callback = (key: string, path: string) =>
+    process.env[key] || (callbackOrigin ? `${callbackOrigin}${path}` : '')
+  const alipayPrivateKey = external('ALIPAY_PRIVATE_KEY')
+  const alipayPublicKey = external('ALIPAY_PUBLIC_KEY')
+  const wechatPrivateKey = external('WECHATPAY_PRIVATE_KEY', 'WECHAT_PAY_PRIVATE_KEY')
+  const wechatPlatformCertificate = external('WECHATPAY_PLATFORM_CERTIFICATE')
 
   return {
     app: {
@@ -140,26 +206,64 @@ export default (): AppConfig => {
       apiKey: process.env.AI_AGENT_API_KEY || fileConfig.ai?.apiKey || '',
     },
     payment: {
-      alipayAppId: process.env.ALIPAY_APP_ID || fileConfig.payment?.alipayAppId || '',
+      alipayAppId: external('ALIPAY_APP_ID') || fileConfig.payment?.alipayAppId || '',
       wechatpayMchId:
-        process.env.WECHATPAY_MCH_ID || process.env.WECHAT_PAY_MCH_ID || fileConfig.payment?.wechatpayMchId || '',
+        external('WECHATPAY_MCH_ID', 'WECHAT_PAY_MCH_ID') ||
+        fileConfig.payment?.wechatpayMchId ||
+        '',
       alipayPrivateKey:
-        process.env.ALIPAY_PRIVATE_KEY || fileConfig.payment?.alipayPrivateKey || '',
-      alipayPublicKey: process.env.ALIPAY_PUBLIC_KEY || fileConfig.payment?.alipayPublicKey || '',
-      alipayNotifyUrl: process.env.ALIPAY_NOTIFY_URL || fileConfig.payment?.alipayNotifyUrl || '',
-      alipayReturnUrl: process.env.ALIPAY_RETURN_URL || fileConfig.payment?.alipayReturnUrl || '',
+        (alipayPrivateKey ? pem(alipayPrivateKey, 'PRIVATE KEY') : '') ||
+        fileConfig.payment?.alipayPrivateKey ||
+        '',
+      alipayPublicKey:
+        (alipayPublicKey ? pem(alipayPublicKey, 'PUBLIC KEY') : '') ||
+        fileConfig.payment?.alipayPublicKey ||
+        '',
+      alipayNotifyUrl:
+        callback('ALIPAY_NOTIFY_URL', '/api/v1/merchant/subscription/payments/alipay/notify') ||
+        fileConfig.payment?.alipayNotifyUrl ||
+        '',
+      alipayWalletNotifyUrl:
+        callback(
+          'ALIPAY_WALLET_NOTIFY_URL',
+          '/api/v1/merchant/wallet/topup/payments/alipay/notify',
+        ) ||
+        fileConfig.payment?.alipayWalletNotifyUrl ||
+        '',
+      alipayReturnUrl: external('ALIPAY_RETURN_URL') || fileConfig.payment?.alipayReturnUrl || '',
+      alipaySandbox: /^(1|true|yes)$/i.test(external('ALIPAY_SANDBOX')),
       wechatpayAppId:
-        process.env.WECHATPAY_APP_ID || process.env.WECHAT_PAY_APP_ID || fileConfig.payment?.wechatpayAppId || '',
+        external('WECHATPAY_APP_ID', 'WECHAT_PAY_APP_ID') ||
+        fileConfig.payment?.wechatpayAppId ||
+        '',
       wechatpaySerialNo:
-        process.env.WECHATPAY_SERIAL_NO || process.env.WECHAT_PAY_CERT_SERIAL_NO || fileConfig.payment?.wechatpaySerialNo || '',
+        external('WECHATPAY_SERIAL_NO', 'WECHAT_PAY_CERT_SERIAL_NO') ||
+        fileConfig.payment?.wechatpaySerialNo ||
+        '',
       wechatpayPrivateKey:
-        process.env.WECHATPAY_PRIVATE_KEY || process.env.WECHAT_PAY_PRIVATE_KEY || fileConfig.payment?.wechatpayPrivateKey || '',
+        (wechatPrivateKey ? pem(wechatPrivateKey, 'PRIVATE KEY') : '') ||
+        fileConfig.payment?.wechatpayPrivateKey ||
+        '',
       wechatpayApiV3Key:
-        process.env.WECHATPAY_API_V3_KEY || process.env.WECHAT_PAY_API_V3_KEY || fileConfig.payment?.wechatpayApiV3Key || '',
+        external('WECHATPAY_API_V3_KEY', 'WECHAT_PAY_API_V3_KEY') ||
+        fileConfig.payment?.wechatpayApiV3Key ||
+        '',
       wechatpayNotifyUrl:
-        process.env.WECHATPAY_NOTIFY_URL || process.env.WECHAT_PAY_NOTIFY_URL || fileConfig.payment?.wechatpayNotifyUrl || '',
+        callback(
+          'WECHATPAY_NOTIFY_URL',
+          '/api/v1/merchant/subscription/payments/wechatpay/notify',
+        ) ||
+        fileConfig.payment?.wechatpayNotifyUrl ||
+        '',
+      wechatpayWalletNotifyUrl:
+        callback(
+          'WECHATPAY_WALLET_NOTIFY_URL',
+          '/api/v1/merchant/wallet/topup/payments/wechatpay/notify',
+        ) ||
+        fileConfig.payment?.wechatpayWalletNotifyUrl ||
+        '',
       wechatpayPlatformCertificate:
-        process.env.WECHATPAY_PLATFORM_CERTIFICATE || process.env.WECHAT_PAY_PLATFORM_CERTIFICATE ||
+        (wechatPlatformCertificate ? pem(wechatPlatformCertificate, 'CERTIFICATE') : '') ||
         fileConfig.payment?.wechatpayPlatformCertificate ||
         '',
     },

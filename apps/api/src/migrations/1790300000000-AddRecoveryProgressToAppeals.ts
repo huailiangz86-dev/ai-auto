@@ -9,13 +9,13 @@ export class AddRecoveryProgressToAppeals1790300000000 implements MigrationInter
 
   async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(
-      `ALTER TABLE "creator_task_appeals" ADD COLUMN "recovery_amount" numeric(14,2) NOT NULL DEFAULT 0`,
+      `ALTER TABLE "creator_task_appeals" ADD COLUMN IF NOT EXISTS "recovery_amount" numeric(14,2) NOT NULL DEFAULT 0`,
     )
     await queryRunner.query(
-      `ALTER TABLE "creator_task_appeals" ADD COLUMN "recovery_recovered_amount" numeric(14,2) NOT NULL DEFAULT 0`,
+      `ALTER TABLE "creator_task_appeals" ADD COLUMN IF NOT EXISTS "recovery_recovered_amount" numeric(14,2) NOT NULL DEFAULT 0`,
     )
     await queryRunner.query(
-      `ALTER TABLE "creator_task_appeals" ADD COLUMN "recovery_completed_at" TIMESTAMP WITH TIME ZONE`,
+      `ALTER TABLE "creator_task_appeals" ADD COLUMN IF NOT EXISTS "recovery_completed_at" TIMESTAMP WITH TIME ZONE`,
     )
     // Historical rows predate per-ruling recovery tracking. They retain the
     // aggregate wallet balance; new adjudications are fully traceable.
@@ -68,8 +68,12 @@ export class AddRecoveryProgressToAppeals1790300000000 implements MigrationInter
   }
 
   async down(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(`ALTER TABLE "creator_task_appeals" DROP COLUMN "recovery_completed_at"`)
-    await queryRunner.query(`ALTER TABLE "creator_task_appeals" DROP COLUMN "recovery_recovered_amount"`)
+    await queryRunner.query(
+      `ALTER TABLE "creator_task_appeals" DROP COLUMN "recovery_completed_at"`,
+    )
+    await queryRunner.query(
+      `ALTER TABLE "creator_task_appeals" DROP COLUMN "recovery_recovered_amount"`,
+    )
     await queryRunner.query(`ALTER TABLE "creator_task_appeals" DROP COLUMN "recovery_amount"`)
   }
 }

@@ -26,6 +26,7 @@ export class AIBridgeService {
     merchant_id: string
     store_id?: string
     language?: string
+    growth_context?: Record<string, unknown>
   }) {
     try {
       const { data } = await firstValueFrom(
@@ -36,6 +37,45 @@ export class AIBridgeService {
       return data
     } catch (error) {
       this.logger.error('Failed to configure campaign', error)
+      throw error
+    }
+  }
+
+  async generateMarketingProduct(params: {
+    merchant_id: string
+    prompt: string
+    category?: string
+  }) {
+    try {
+      const { data } = await firstValueFrom(
+        this.httpService.post('/api/v1/campaign/product/generate', params, {
+          headers: this.getHeaders(),
+        }),
+      )
+      return data
+    } catch (error) {
+      this.logger.error('Failed to generate marketing product draft', error)
+      throw error
+    }
+  }
+
+  async growthIntake(params: {
+    merchant_id: string
+    message: string
+    history: { role: 'user' | 'assistant'; content: string }[]
+    current: Record<string, unknown>
+    available_stores: { id: string; name: string; code: string }[]
+    language?: string
+  }) {
+    try {
+      const { data } = await firstValueFrom(
+        this.httpService.post('/api/v1/campaign/growth-intake', params, {
+          headers: this.getHeaders(),
+        }),
+      )
+      return data
+    } catch (error) {
+      this.logger.error('Failed to parse growth plan conversation', error)
       throw error
     }
   }
@@ -60,7 +100,7 @@ export class AIBridgeService {
    */
   async recommendCampaigns(params: {
     merchant_id: string
-    holidays: Array<{ id: string; name: string; date: string; days_away: number }>
+    holidays: { id: string; name: string; date: string; days_away: number }[]
     history: Record<string, any>
     customer_profile: Record<string, any>
     peer_benchmark: Record<string, any>

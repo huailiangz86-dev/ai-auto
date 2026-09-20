@@ -1,4 +1,4 @@
-import { BadRequestException } from '@nestjs/common'
+import { BadRequestException, NotFoundException } from '@nestjs/common'
 import { DataSource } from 'typeorm'
 
 import { AgentWallet } from '../agent/entities/agent-wallet.entity'
@@ -56,6 +56,7 @@ describe('GrowthTaskService risk hold payout coordination', () => {
     }
     dataSource = {
       transaction: jest.fn((fn: (transactionManager: any) => Promise<unknown>) => fn(manager)),
+      getRepository: jest.fn(() => ({ save: jest.fn().mockResolvedValue(undefined) })),
     }
     service = new GrowthTaskService(
       {} as any,
@@ -241,6 +242,74 @@ describe('GrowthTaskService risk hold payout coordination', () => {
     })
     expect(manager.save).toHaveBeenCalledWith(
       expect.objectContaining({ status: 'expired', stateReason: '邀约已超过截止时间' }),
+    )
+  })
+
+  it('保存达人提交的草稿证据，供商家审核', async () => {
+    task.status = 'creating'
+
+    const result = await service.moveCreatorTaskForCreator(
+      'creator-1',
+      'task-1',
+      'submitted',
+      undefined,
+      undefined,
+      {
+        draftUrl: 'https://example.test/draft/1',
+        note: '已按门店 brief 修改',
+        contentIds: ['11111111-1111-4111-8111-111111111111'],
+      },
+    )
+
+    expect(result).toMatchObject({ status: 'submitted' })
+    expect(task.submissionEvidence).toMatchObject({
+      draftUrl: 'https://example.test/draft/1',
+      note: '已按门店 brief 修改',
+      contentIds: ['11111111-1111-4111-8111-111111111111'],
+      submittedAt: expect.any(String),
+    })
+  })
+
+  it('商家只能审核自己的待审核内容', async () => {
+    task.status = 'submitted'
+
+    await expect(
+      service.reviewCreatorTaskForMerchant(
+        'merchant-other',
+        'task-1',
+        'merchant-user-2',
+        'approve',
+        '通过',
+      ),
+    ).rejects.toBeInstanceOf(NotFoundException)
+
+    expect(task.status).toBe('submitted')
+  })
+
+  it('商家通过内容审核后通知达人可以发布', async () => {
+    task.status = 'submitted'
+    const notificationRepo = { save: jest.fn().mockResolvedValue(undefined) }
+    dataSource.getRepository.mockReturnValue(notificationRepo)
+
+    const result = await service.reviewCreatorTaskForMerchant(
+      'merchant-1',
+      'task-1',
+      'merchant-user-1',
+      'approve',
+      '门店信息和优惠说明准确',
+    )
+
+    expect(result).toMatchObject({
+      status: 'approved',
+      reviewReason: '门店信息和优惠说明准确',
+      reviewedBy: 'merchant-user-1',
+    })
+    expect(notificationRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        recipientId: 'creator-1',
+        type: 'creator_task_merchant_reviewed',
+        metadata: expect.objectContaining({ decision: 'approve' }),
+      }),
     )
   })
 })

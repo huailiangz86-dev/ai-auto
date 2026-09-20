@@ -82,6 +82,18 @@ export default [
         document: 'readonly',
         fetch: 'readonly',
         window: 'readonly',
+        localStorage: 'readonly',
+        navigator: 'readonly',
+      },
+    },
+  },
+
+  // Uni-app globals for the customer mini-program.
+  {
+    files: ['apps/customer-miniapp/src/**/*.{ts,tsx}'],
+    languageOptions: {
+      globals: {
+        uni: 'readonly',
       },
     },
   },

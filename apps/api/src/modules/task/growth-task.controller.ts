@@ -12,6 +12,7 @@ import {
   PublishCreatorTaskDto,
   ReviewCreatorTaskDto,
   ResolveRiskHoldDto,
+  SubmitCreatorTaskDto,
   OperationsQueueQueryDto,
   TaskReasonDto,
 } from './dto/growth-task.dto'
@@ -99,6 +100,22 @@ export class MerchantGrowthTaskController {
   ) {
     return this.service.moveCreatorTaskForMerchant(user.merchantId, id, 'cancelled', dto.reason)
   }
+
+  @Post('creator-tasks/:creatorTaskId/review')
+  @ApiOperation({ summary: '商家审核自己收到的达人内容交付' })
+  reviewCreatorTask(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('creatorTaskId') id: string,
+    @Body() dto: ReviewCreatorTaskDto,
+  ) {
+    return this.service.reviewCreatorTaskForMerchant(
+      user.merchantId,
+      id,
+      user.id,
+      dto.decision,
+      dto.reason,
+    )
+  }
 }
 
 @ApiTags('V2 创作者任务')
@@ -132,8 +149,23 @@ export class CreatorTaskController {
     return this.service.moveCreatorTaskForCreator(user.agentId, id, 'creating')
   }
   @Post(':creatorTaskId/submit')
-  submit(@CurrentUser() user: CurrentUserPayload, @Param('creatorTaskId') id: string) {
-    return this.service.moveCreatorTaskForCreator(user.agentId, id, 'submitted')
+  submit(
+    @CurrentUser() user: CurrentUserPayload,
+    @Param('creatorTaskId') id: string,
+    @Body() dto: SubmitCreatorTaskDto,
+  ) {
+    return this.service.moveCreatorTaskForCreator(
+      user.agentId,
+      id,
+      'submitted',
+      undefined,
+      undefined,
+      {
+        draftUrl: dto.draftUrl,
+        note: dto.note,
+        contentIds: dto.contentIds,
+      },
+    )
   }
   @Post(':creatorTaskId/publish')
   publish(

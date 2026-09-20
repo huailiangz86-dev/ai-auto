@@ -38,8 +38,44 @@ export class MarketingProductService {
       skip: (page - 1) * pageSize,
       take: pageSize,
     })
+    const productIds = products.map((product) => product.id)
+    const mappings = productIds.length
+      ? await this.mappingRepo.find({
+          where: { merchantId, productId: In(productIds), type: 'catalogue' },
+        })
+      : []
+    const couponIds = [...new Set(mappings.map((mapping) => mapping.couponId))]
+    const coupons = couponIds.length
+      ? await this.couponRepo.find({ where: { merchantId, id: In(couponIds) } })
+      : []
+    const campaignIds = [...new Set(coupons.map((coupon) => coupon.campaignId))]
+    const campaigns = campaignIds.length
+      ? await this.campaignRepo.find({ where: { merchantId, id: In(campaignIds) } })
+      : []
+    const couponById = new Map(coupons.map((coupon) => [coupon.id, coupon]))
+    const campaignById = new Map(campaigns.map((campaign) => [campaign.id, campaign]))
+    const linksByProduct = new Map<
+      string,
+      { couponId: string; campaignId: string; campaignName: string }[]
+    >()
+    for (const mapping of mappings) {
+      if (!mapping.productId) continue
+      const coupon = couponById.get(mapping.couponId)
+      const campaign = coupon ? campaignById.get(coupon.campaignId) : undefined
+      if (!coupon || !campaign) continue
+      const links = linksByProduct.get(mapping.productId) ?? []
+      if (!links.some((link) => link.couponId === coupon.id))
+        links.push({
+          couponId: coupon.id,
+          campaignId: campaign.id,
+          campaignName: campaign.campaignName,
+        })
+      linksByProduct.set(mapping.productId, links)
+    }
     return {
-      items: products.map((product) => this.serializeProduct(product)),
+      items: products.map((product) =>
+        this.serializeProduct(product, linksByProduct.get(product.id) ?? []),
+      ),
       pagination: { page, pageSize, total, totalPages: Math.ceil(total / pageSize) },
     }
   }
@@ -125,7 +161,7 @@ export class MarketingProductService {
       for (const dtoSku of dto.skus) {
         if (dtoSku.skuId && !currentById.has(dtoSku.skuId))
           throw new BadRequestException({ code: 4003, message: 'SKU 不属于该营销商品' })
-        const sku = dtoSku.skuId ? currentById.get(dtoSku.skuId)! : skus.create({ productId })
+        const sku = dtoSku.skuId ? currentById.get(dtoSku.skuId) : skus.create({ productId })
         Object.assign(sku, {
           skuName: dtoSku.skuName,
           skuCode: dtoSku.skuCode,
@@ -185,14 +221,37 @@ export class MarketingProductService {
     if (productIds.length !== dto.productSelections.length)
       throw new BadRequestException({ code: 4001, message: '同一营销商品只能选择一次' })
     const products = await this.productRepo.find({
-      where: { id: In(productIds), merchantId, status: 'on_sale' },
+      where: { id: In(productIds), merchantId },
       relations: ['skus'],
     })
     if (products.length !== productIds.length)
-      throw new BadRequestException({ code: 4002, message: '营销商品不存在或未上架' })
+      throw new BadRequestException({ code: 4002, message: '营销商品不存在' })
+    if (products.some((product) => product.status === 'off_shelf'))
+      throw new BadRequestException({
+        code: 4002,
+        message: '已下架的营销商品不能关联，请先重新上架',
+      })
+    const externalProductIds = products
+      .map((product) => product.externalProductId)
+      .filter((externalProductId): externalProductId is string => Boolean(externalProductId))
+    if (
+      externalProductIds.length &&
+      (await this.mappingRepo.findOne({
+        where: {
+          merchantId,
+          couponId,
+          type: 'legacy_external',
+          externalProductId: In(externalProductIds),
+        },
+      }))
+    )
+      throw new BadRequestException({
+        code: 4006,
+        message: '同一外部商品已存在旧映射，请先删除旧映射再关联营销商品',
+      })
     const records: Partial<CouponProductMapping>[] = []
     for (const selection of dto.productSelections) {
-      const product = products.find((item) => item.id === selection.productId)!
+      const product = products.find((item) => item.id === selection.productId)
       const skuIds = [...new Set(selection.skuIds ?? [])]
       if (!skuIds.length)
         records.push({
@@ -236,6 +295,15 @@ export class MarketingProductService {
     dto: CreateExternalCouponProductMappingDto,
   ) {
     await this.getCouponForMerchant(merchantId, couponId, true)
+    if (
+      await this.productRepo.exist({
+        where: { merchantId, externalProductId: dto.externalProductId },
+      })
+    )
+      throw new BadRequestException({
+        code: 4006,
+        message: '该外部商品已存在营销商品，请直接关联营销商品，避免重复创建映射',
+      })
     let mapping = await this.mappingRepo.findOne({
       where: {
         merchantId,
@@ -288,7 +356,10 @@ export class MarketingProductService {
       throw new BadRequestException({ code: 4005, message: '同一营销商品内 SKU 编码不能重复' })
   }
 
-  private serializeProduct(product: MarketingProduct) {
+  private serializeProduct(
+    product: MarketingProduct,
+    linkedCampaigns: { couponId: string; campaignId: string; campaignName: string }[] = [],
+  ) {
     return {
       productId: product.id,
       productName: product.productName,
@@ -297,6 +368,7 @@ export class MarketingProductService {
       productSource: product.productSource,
       externalProductId: product.externalProductId,
       status: product.status,
+      linkedCampaigns,
       skus: (product.skus ?? []).map((sku) => ({
         skuId: sku.id,
         skuName: sku.skuName,

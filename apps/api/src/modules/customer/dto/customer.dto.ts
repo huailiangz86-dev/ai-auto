@@ -34,6 +34,12 @@ export class CreateAttributionDto {
   @IsString()
   campaignId?: string
 
+  @ApiPropertyOptional({ description: '达人内容专属追踪标识；服务端会校验其与达人、活动的一致性' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  trackingId?: string
+
   @ApiProperty({
     description: '来源类型',
     enum: ['share_link', 'qr_code', 'lbs', 'search', 'wechat_mp'],
@@ -75,7 +81,10 @@ export class ClaimCouponDto {
   @IsString()
   attributionId?: string
 
-  @ApiPropertyOptional({ description: '是否同意将本券与来源内容/任务关联，用于核销归因', default: false })
+  @ApiPropertyOptional({
+    description: '是否同意将本券与来源内容/任务关联，用于核销归因',
+    default: false,
+  })
   @IsOptional()
   @IsBoolean()
   trackingConsent?: boolean
